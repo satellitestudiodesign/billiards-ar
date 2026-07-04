@@ -8,7 +8,7 @@
  * The R3F render layer maps a physics point (x, y, z) to the three.js
  * table-local position (x, z + ballRadius, y).
  */
-import { Vector3 } from 'three'
+import { Quaternion, Vector3 } from 'three'
 import { Ball, State } from './vendor/model/ball'
 import { Table } from './vendor/model/table'
 import { OutcomeType } from './vendor/model/outcome'
@@ -38,6 +38,8 @@ export interface BallSnapshot {
   z: number
   /** False once the ball has settled inside a pocket (hide it). */
   visible: boolean
+  /** Orientation quaternion in render frame [x, y, z, w] — apply straight to the mesh. */
+  rot: [number, number, number, number]
 }
 
 export interface SimEvent {
@@ -120,11 +122,33 @@ export function simulate(
   table.cueball.rvel.copy(strike.rvel)
   table.cueball.state = State.Sliding
 
-  // One flat snapshot per step: [x, y, z, visible] per ball.
+  // Orientation isn't tracked by the vendored physics, so integrate it here
+  // from angular velocity (rvel). Physics frame is x=long, y=short, z=up.
+  const orient = bs.map(() => new Quaternion())
+  const dq = new Quaternion()
+  const axis = new Vector3()
+  const spin = () => {
+    for (let k = 0; k < bs.length; k++) {
+      const w = bs[k].rvel
+      const speed = w.length()
+      if (speed < 1e-9) continue
+      axis.copy(w).multiplyScalar(1 / speed)
+      dq.setFromAxisAngle(axis, speed * PHYSICS_STEP)
+      orient[k].premultiply(dq).normalize()
+    }
+  }
+
+  // One flat snapshot per step: [x, y, z, visible, qx, qy, qz, qw] per ball.
+  // The render frame swaps physics y and z (see file header), a reflection, so
+  // map the quaternion the same way: (qx,qy,qz,qw) -> (-qx,-qz,-qy,qw).
   const frames: number[][] = []
   const record = () => {
     const f: number[] = []
-    for (const b of bs) f.push(b.pos.x, b.pos.y, b.pos.z, b.state === State.InPocket ? 0 : 1)
+    for (let k = 0; k < bs.length; k++) {
+      const b = bs[k]
+      const q = orient[k]
+      f.push(b.pos.x, b.pos.y, b.pos.z, b.state === State.InPocket ? 0 : 1, -q.x, -q.z, -q.y, q.w)
+    }
     frames.push(f)
   }
 
@@ -132,6 +156,7 @@ export function simulate(
   let t = 0
   while (!table.allStationary() && t < maxDuration) {
     table.advance(PHYSICS_STEP)
+    spin()
     t += PHYSICS_STEP
     record()
   }
@@ -156,10 +181,11 @@ export function simulate(
       const i = Math.min(last, Math.max(0, Math.round(time / PHYSICS_STEP)))
       const f = frames[i]
       return bs.map((_, k) => ({
-        x: f[k * 4],
-        y: f[k * 4 + 1],
-        z: f[k * 4 + 2],
-        visible: f[k * 4 + 3] === 1,
+        x: f[k * 8],
+        y: f[k * 8 + 1],
+        z: f[k * 8 + 2],
+        visible: f[k * 8 + 3] === 1,
+        rot: [f[k * 8 + 4], f[k * 8 + 5], f[k * 8 + 6], f[k * 8 + 7]],
       }))
     },
   }

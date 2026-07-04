@@ -29,7 +29,7 @@ export function DebugApp() {
         <color attach="background" args={['#15151c']} />
         <ambientLight intensity={1} />
         <gridHelper args={[6, 24, '#333', '#222']} />
-        <TableContents sizeClass={phase.fit.sizeClass} />
+        <TableContents sizeClass={phase.fit.sizeClass} showRails />
         <DrillBalls />
         <OrbitControls target={[0, 0, 0]} />
       </Canvas>

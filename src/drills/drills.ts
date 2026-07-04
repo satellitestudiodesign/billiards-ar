@@ -9,7 +9,8 @@ export interface Drill {
   id: string
   name: string
   description: string
-  balls: Array<[number, number]>
+  /** balls[0] is the cue (no num); object balls carry their number (1..15). */
+  balls: Array<{ x: number; y: number; num?: number }>
   shot: { speed: number; side: number; vertical: number } & (
     | { aim: 'angle'; angle: number }
     | { aim: 'pocket'; pocketIndex: number }
@@ -20,32 +21,79 @@ export const DRILLS: Drill[] = [
   {
     id: 'stop',
     name: 'Stop shot',
-    description: 'Straight shot, slight draw: the cue ball should stop dead on contact.',
+    description: 'Pot the 1 in the corner; the cue ball should stop dead on contact.',
+    // On the centre→NE-corner diagonal (fx = fy lies on that line), so the
+    // head-on hit sends the 1 into the corner and shows the cue action.
     balls: [
-      [-0.25, 0],
-      [0.25, 0],
+      { x: -0.2, y: -0.2 },
+      { x: 0.25, y: 0.25, num: 1 },
     ],
-    shot: { aim: 'angle', angle: 0, speed: 2.2, side: 0, vertical: -0.2 },
+    shot: { aim: 'pocket', pocketIndex: 4 /* NE corner */, speed: 2.6, side: 0, vertical: -0.3 },
   },
   {
     id: 'draw',
     name: 'Draw shot',
-    description: 'Straight shot with heavy backspin: the cue ball returns toward you.',
+    description: 'Pot the 1 in the corner; heavy backspin draws the cue ball back.',
     balls: [
-      [-0.25, 0],
-      [0.25, 0],
+      { x: -0.2, y: -0.2 },
+      { x: 0.25, y: 0.25, num: 1 },
     ],
-    shot: { aim: 'angle', angle: 0, speed: 2.4, side: 0, vertical: -0.45 },
+    shot: { aim: 'pocket', pocketIndex: 4 /* NE corner */, speed: 2.4, side: 0, vertical: -0.75 },
   },
   {
     id: 'cut-corner',
     name: 'Cut to corner',
     description: 'Cut the object ball into the far corner pocket.',
     balls: [
-      [-0.2, -0.15],
-      [0.15, 0.1],
+      { x: -0.2, y: -0.15 },
+      { x: 0.15, y: 0.1, num: 1 },
     ],
-    shot: { aim: 'pocket', pocketIndex: 4 /* NE corner (+x, +y) */, speed: 2.0, side: 0, vertical: 0 },
+    shot: { aim: 'pocket', pocketIndex: 4 /* NE corner (+x, +y) */, speed: 2.0, side: -0.1, vertical: 0 },
+  },
+  {
+    id: '9ball-break',
+    name: '9-ball break',
+    description: 'Full-speed break into a diamond rack from the head string.',
+    // Diamond rack (1,2,3,2,1). 9-ball convention: the diamond centre (the
+    // 9) sits on the foot spot (fx 0.25); the apex 1-ball is higher, toward
+    // the cue. balls[1] is the apex 1-ball. Spacing is baked at 9ft with a
+    // ~1.2% gap — as tight as the solver allows: a fully-touching rack (and
+    // anything under ~1% gap) throws "Depth exceeded resolving collisions"
+    // (all contacts fire in one step). ponytail: tuned for 9ft/speed 6.
+    // Apex = 1, centre = 9 (fixed by the rules); 2..8 fill the rest.
+    balls: [
+      { x: -0.25, y: 0.43 }, // cue: head string, one ball off the side rail — where most break from
+      { x: 0.2105, y: 0, num: 1 }, // apex
+      { x: 0.2303, y: 0.0228, num: 5 },
+      { x: 0.2303, y: -0.0228, num: 7 },
+      { x: 0.25, y: 0, num: 9 }, // diamond centre, on the foot spot
+      { x: 0.25, y: 0.0455, num: 4 },
+      { x: 0.25, y: -0.0455, num: 2 },
+      { x: 0.2697, y: 0.0228, num: 6 },
+      { x: 0.2697, y: -0.0228, num: 8 },
+      { x: 0.2895, y: 0, num: 3 },
+    ],
+    // Aimed from the rail-side cue at the apex 1-ball (≈ -25°).
+    shot: { aim: 'angle', angle: -0.426, speed: 8, side: 0, vertical: -0.2 },
+  },
+  {
+    id: '9ball-break-other',
+    name: '9-ball break (other side)',
+    description: 'Same break from one ball off the opposite side rail (mirrored in y).',
+    // Rack is symmetric about y=0, so the mirror just flips the cue and aim.
+    balls: [
+      { x: -0.25, y: -0.43 }, // cue: one ball off the far side rail
+      { x: 0.2105, y: 0, num: 1 }, // apex
+      { x: 0.2303, y: 0.0228, num: 5 },
+      { x: 0.2303, y: -0.0228, num: 7 },
+      { x: 0.25, y: 0, num: 9 }, // diamond centre, on the foot spot
+      { x: 0.25, y: 0.0455, num: 4 },
+      { x: 0.25, y: -0.0455, num: 2 },
+      { x: 0.2697, y: 0.0228, num: 6 },
+      { x: 0.2697, y: -0.0228, num: 8 },
+      { x: 0.2895, y: 0, num: 3 },
+    ],
+    shot: { aim: 'angle', angle: 0.426, speed: 8, side: 0, vertical: -0.2 },
   },
 ]
 

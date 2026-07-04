@@ -31,6 +31,14 @@ describe('simulate', () => {
     expect(cue.visible).toBe(true)
   })
 
+  it('cue ball accumulates a unit-norm spin orientation as it rolls', () => {
+    const sim = simulate([{ x: -0.6, y: 0 }], { angle: 0, speed: 1.5, side: 0, vertical: 0 })
+    const [cue] = finalState(sim)
+    const [x, y, z, w] = cue.rot
+    expect(x * x + y * y + z * z + w * w).toBeCloseTo(1, 5) // stays a valid rotation
+    expect(cue.rot).not.toEqual([0, 0, 0, 1]) // it actually rotated
+  })
+
   it('is deterministic', () => {
     const run = () =>
       simulate(

@@ -34,6 +34,15 @@ export class Ball {
 
   static readonly transition = 0.05
 
+  // Low-speed braking, layered on the linear rolling model. Real cloth nap
+  // grabs a slowing ball progressively, so the approach to rest is curved, not
+  // the model's constant-deceleration straight line. Below brakeBand an extra
+  // drag ramps in (→ full at restSpeed); below restSpeed the ball snaps to rest
+  // so it can't creep forever. Three tuning knobs — adjust on-device.
+  static restSpeed = 0.02 // m/s: snap-to-rest floor
+  static brakeBand = 0.4 // m/s: speed where extra drag starts ramping in
+  static brakeStrength = 1 // 1/s: extra decel at the rest edge
+
   constructor(pos: Vector3, label?: number) {
     this.pos = pos.clone()
     this.label = label
@@ -69,8 +78,20 @@ export class Ball {
     if (this.inMotion()) {
       if (this.isRolling()) {
         this.state = State.Rolling
+        const speed = this.vel.length()
+        if (speed < Ball.restSpeed) {
+          this.setStationary()
+          return
+        }
         forceRoll(this.vel, this.rvel)
         this.addDelta(t, rollingFull(this.rvel, this.vel, t))
+        // Nonlinear tail: extra drag grows as speed falls through the band.
+        if (speed < Ball.brakeBand) {
+          const depth = (Ball.brakeBand - speed) / Ball.brakeBand // 0..1, →1 near rest
+          const damp = Math.max(0, 1 - Ball.brakeStrength * depth * t)
+          this.vel.multiplyScalar(damp)
+          this.rvel.multiplyScalar(damp) // keep roll matched so isRolling holds
+        }
       } else {
         this.state = State.Sliding
         this.addDelta(t, sliding(this.vel, this.rvel))

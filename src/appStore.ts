@@ -103,7 +103,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const drill = DRILLS.find((d) => d.id === phase.drillId) ?? DRILLS[0]
     const L = PLAYING_LENGTH[phase.fit.sizeClass]
     configureTableSize(L)
-    const balls = drill.balls.map(([fx, fy]) => ({ x: fx * L, y: fy * (L / 2) }))
+    const balls = drill.balls.map((b) => ({ x: b.x * L, y: b.y * (L / 2) }))
     const sim = simulate(balls, resolveShot(drill, balls))
     set({
       phase: {
