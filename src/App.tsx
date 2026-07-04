@@ -15,8 +15,12 @@ export function App() {
 function ARApp() {
   const [supported, setSupported] = useState<boolean | null>(null)
   useEffect(() => {
+    if (!navigator.xr) {
+      setSupported(false)
+      return
+    }
     navigator.xr
-      ?.isSessionSupported('immersive-ar')
+      .isSessionSupported('immersive-ar')
       .then(setSupported)
       .catch(() => setSupported(false))
   }, [])
@@ -34,6 +38,7 @@ function ARApp() {
           gap: 16,
           textAlign: 'center',
           padding: 24,
+          zIndex: 1,
         }}
       >
         <h1 style={{ margin: 0, fontSize: 28 }}>AR Billiards Trainer</h1>

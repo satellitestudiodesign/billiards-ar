@@ -20,10 +20,10 @@
     "zustand": "^5"
   },
   "devDependencies": {
+    "@types/node": "^26.1.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.182.0",
-    "@vitejs/plugin-basic-ssl": "^2.1.0",
     "@vitejs/plugin-react": "^4",
     "typescript": "~5.8",
     "vite": "^7",
