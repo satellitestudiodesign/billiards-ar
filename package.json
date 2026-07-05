@@ -15,6 +15,7 @@
     "@react-three/drei": "^10",
     "@react-three/fiber": "^9",
     "@react-three/xr": "^6.6",
+    "@techstark/opencv-js": "5.0.0-release.1",
     "react": "^19",
     "react-dom": "^19",
     "three": "^0.182.0",

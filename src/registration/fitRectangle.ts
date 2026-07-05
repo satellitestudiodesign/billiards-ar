@@ -47,7 +47,7 @@ export function validateQuad(taps: Vector3[]): string | null {
   if (taps.length !== 4) return 'need exactly 4 corners'
   for (let i = 0; i < 4; i++) {
     const d = taps[i].distanceTo(taps[(i + 1) % 4])
-    if (d < 0.3) return 'corners too close together'
+    if (d < 0.3) return `corners too close together (edge ${(d * 100).toFixed(0)}cm, need ≥30cm)`
   }
   const e0 = taps[0].distanceTo(taps[1])
   const e1 = taps[1].distanceTo(taps[2])

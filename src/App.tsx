@@ -5,10 +5,14 @@ import { xrStore } from './xr/xrStore'
 import { ARScene } from './scene/ARScene'
 import { Overlay } from './ui/Overlay'
 import { DebugApp } from './DebugApp'
+import { DetectDebug } from './DetectDebug'
 
 export function App() {
+  const params = new URLSearchParams(location.search)
+  // ?detect — desktop route: run the felt detector on a picked photo
+  if (params.has('detect')) return <DetectDebug />
   // ?debug — desktop route: table + drills + playback in a normal canvas
-  if (new URLSearchParams(location.search).has('debug')) return <DebugApp />
+  if (params.has('debug')) return <DebugApp />
   return <ARApp />
 }
 

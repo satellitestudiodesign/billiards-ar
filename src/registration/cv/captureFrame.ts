@@ -32,6 +32,10 @@ export interface CameraCapture {
   image: ImageData
   width: number
   height: number
+  /** XRView projection matrix at capture (column-major 16). */
+  projection: number[]
+  /** XRView pose = camera-to-world matrix at capture (column-major 16). */
+  view: number[]
 }
 
 /** Wait for one XRFrame, or null if none arrives within `timeoutMs`. */
@@ -60,7 +64,7 @@ export async function captureCameraFrame(renderer: WebGLRenderer): Promise<Camer
   try {
     const view = frame.getViewerPose(refSpace)?.views[0]
     const xrCamera = view?.camera
-    if (!xrCamera) return null // raw-camera-access not granted/supported
+    if (!view || !xrCamera) return null // raw-camera-access not granted/supported
 
     const binding = new XRWebGLBinding(session, gl)
     const texture = binding.getCameraImage(xrCamera)
@@ -88,7 +92,17 @@ export async function captureCameraFrame(renderer: WebGLRenderer): Promise<Camer
       const src = (height - 1 - y) * rowBytes
       flipped.set(raw.subarray(src, src + rowBytes), y * rowBytes)
     }
-    return { image: new ImageData(flipped, width, height), width, height }
+    // Use the XRView's OWN projection + pose for back-projection, not the
+    // three.js render camera — the render ArrayCamera's frustum can differ
+    // from the view the raw image was captured through, which biased corners
+    // (the projectToPlane calibration note). Column-major, straight from WebXR.
+    return {
+      image: new ImageData(flipped, width, height),
+      width,
+      height,
+      projection: Array.from(view.projectionMatrix),
+      view: Array.from(view.transform.matrix),
+    }
   } catch {
     return null
   }

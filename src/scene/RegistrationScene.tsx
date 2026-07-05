@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Matrix4, PerspectiveCamera, Vector3, type Group } from 'three'
+import { Matrix4, Vector3, type Group } from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Billboard, Text } from '@react-three/drei'
 import { useXRHitTest, useXRInputSourceEvent } from '@react-three/xr'
@@ -7,7 +7,14 @@ import { useAppStore } from '../appStore'
 import { reticle } from '../xr/reticleState'
 import { captureCameraFrame } from '../registration/cv/captureFrame'
 import { detectQuad } from '../registration/cv/detectQuad'
-import { planeFromPose, projectToPlane } from '../registration/cv/projectToPlane'
+import { detectQuadCv } from '../registration/cv/detectQuadCv'
+import { preloadOpenCv } from '../registration/cv/opencv'
+import {
+  cameraFromCapture,
+  planeFromPose,
+  projectToPlane,
+  type ProjectDiag,
+} from '../registration/cv/projectToPlane'
 import { overlayTappedRecently } from '../ui/overlayGuard'
 
 const scratchMatrix = new Matrix4()
@@ -26,7 +33,12 @@ export function RegistrationScene() {
   const autoNonce = useAppStore((s) => s.autoNonce)
   const reticleRef = useRef<Group>(null)
   const gl = useThree((s) => s.gl)
-  const camera = useThree((s) => s.camera)
+
+  // Start the OpenCV wasm download as soon as we're in the registration scene,
+  // so the first Auto-detect isn't stalled behind a ~9 MB fetch.
+  useEffect(() => {
+    preloadOpenCv()
+  }, [])
 
   // CV auto-registration: on each requestAutoDetect() (autoNonce bump), grab a
   // camera frame, detect the felt quad, back-project onto the reticle's plane,
@@ -39,28 +51,38 @@ export function RegistrationScene() {
     }
     ;(async () => {
       if (!reticle.visible) return fail('Point the ring at the felt first, then Auto-detect')
-      // Snapshot camera pose+projection now; the async capture lets it drift.
-      const snap = new PerspectiveCamera()
-      snap.matrixWorld.copy(camera.matrixWorld)
-      snap.matrixWorldInverse.copy(camera.matrixWorld).invert()
-      snap.projectionMatrix.copy(camera.projectionMatrix)
-      snap.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
+      // Felt plane from the reticle pose (world space) — independent of camera.
       const normal = new Vector3(0, 1, 0).applyQuaternion(reticle.quaternion)
       const plane = planeFromPose(reticle.position, normal)
 
       const cap = await captureCameraFrame(gl)
       if (cancelled) return
       if (!cap) return fail('Auto-detect unavailable on this device — tap the 4 corners')
-      const quad = detectQuad(cap.image)
+
+      // Advanced OpenCV detector first; fall back to the heuristic one if the
+      // wasm didn't load or it found nothing.
+      const cv = await detectQuadCv(cap.image)
+      if (cancelled) return
+      const quad = cv?.corners ?? detectQuad(cap.image)
       if (!quad) return fail("Couldn't find the felt — aim at the whole table or tap the 4 corners")
-      const world = projectToPlane(quad, cap.width, cap.height, snap, plane)
-      if (!world) return fail('Table not in view — tap the 4 corners')
+
+      // Back-project through the exact XRView frustum the image was captured
+      // through (fixes the FOV-mismatch bias).
+      const cam = cameraFromCapture(cap)
+      const diag: ProjectDiag = { ndc: [], missedAt: -1 }
+      const world = projectToPlane(quad, cap.width, cap.height, cam, plane, diag)
+      if (!world) {
+        const c = quad[diag.missedAt] ?? quad[0]
+        return fail(
+          `Table not in view — tap the 4 corners (corner ${diag.missedAt + 1} off-plane @ ${Math.round(c.x)},${Math.round(c.y)} of ${cap.width}×${cap.height})`,
+        )
+      }
       if (!cancelled) useAppStore.getState().submitCorners(world)
     })()
     return () => {
       cancelled = true
     }
-  }, [autoNonce, gl, camera])
+  }, [autoNonce, gl])
   // Tracking-lost toast: track when the reticle first started missing and
   // whether we've already shown the toast, so the store is written only on
   // transitions (not every frame).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectQuad, type PixelPoint } from './detectQuad'
+import { detectQuad, orderCorners, type PixelPoint } from './detectQuad'
 
 /** Build an ImageData with a filled colour quad (rotated rect) over a grey bg. */
 function makeImage(
@@ -64,6 +64,19 @@ describe('detectQuad', () => {
     ]
     const img = makeImage(200, 160, [30, 80, 190], quad)
     expect(detectQuad(img)).not.toBeNull()
+  })
+
+  it('orders arbitrary corners as TL, TR, BR, BL', () => {
+    // Shuffled input; expect image-space TL, TR, BR, BL out.
+    const tl = { x: 12, y: 10 }
+    const tr = { x: 190, y: 14 }
+    const br = { x: 185, y: 150 }
+    const bl = { x: 8, y: 145 }
+    const [a, b, c, d] = orderCorners([br, tl, bl, tr])
+    expect(a).toEqual(tl)
+    expect(b).toEqual(tr)
+    expect(c).toEqual(br)
+    expect(d).toEqual(bl)
   })
 
   it('returns null when there is no felt', () => {

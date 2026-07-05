@@ -12,14 +12,44 @@
  * corners will be biased. If so, build the ray from the XRView camera
  * intrinsics instead of the render camera's projectionMatrix.
  */
-import { Plane, Raycaster, Vector2, Vector3, type Camera } from 'three'
+import { Plane, PerspectiveCamera, Raycaster, Vector2, Vector3, type Camera } from 'three'
 import type { PixelPoint } from './detectQuad'
+import type { CameraCapture } from './captureFrame'
 
 const raycaster = new Raycaster()
+
+/**
+ * Build the exact capture-time camera from a frame's XRView intrinsics, so
+ * back-projected rays use the frustum the raw image was actually captured
+ * through (not the three.js render camera — see captureFrame's note).
+ *
+ * ⚠️ Residual calibration knob: `projection` is the XRView's viewport
+ * projection. If the raw camera image reports a different aspect than the
+ * view (xrCamera.width/height vs the view viewport), the NDC x/y mapping is
+ * still slightly skewed. VERIFY on-device; if corners are biased along one
+ * axis, correct with the image aspect here.
+ */
+export function cameraFromCapture(cap: CameraCapture): Camera {
+  const cam = new PerspectiveCamera()
+  cam.matrixAutoUpdate = false
+  cam.projectionMatrix.fromArray(cap.projection)
+  cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert()
+  cam.matrixWorld.fromArray(cap.view)
+  cam.matrixWorldInverse.copy(cam.matrixWorld).invert()
+  return cam
+}
 
 /** Image pixel (origin top-left, +y down) → NDC (origin center, +y up). */
 export function pixelToNdc(p: PixelPoint, width: number, height: number): Vector2 {
   return new Vector2((p.x / width) * 2 - 1, -((p.y / height) * 2 - 1))
+}
+
+/** Diagnostics filled by projectToPlane (for on-device failure hints). */
+export interface ProjectDiag {
+  /** NDC of each input corner, in order. */
+  ndc: Array<[number, number]>
+  /** Index of the first corner whose ray missed the plane, or -1. */
+  missedAt: number
 }
 
 /**
@@ -37,12 +67,18 @@ export function projectToPlane(
   height: number,
   camera: Camera,
   plane: Plane,
+  diag?: ProjectDiag,
 ): Vector3[] | null {
   const out: Vector3[] = []
-  for (const c of corners) {
-    raycaster.setFromCamera(pixelToNdc(c, width, height), camera)
+  for (let i = 0; i < corners.length; i++) {
+    const ndc = pixelToNdc(corners[i], width, height)
+    if (diag) diag.ndc.push([ndc.x, ndc.y])
+    raycaster.setFromCamera(ndc, camera)
     const hit = new Vector3()
-    if (!raycaster.ray.intersectPlane(plane, hit)) return null
+    if (!raycaster.ray.intersectPlane(plane, hit)) {
+      if (diag) diag.missedAt = i
+      return null
+    }
     out.push(hit)
   }
   return out

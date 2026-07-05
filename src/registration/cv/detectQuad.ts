@@ -67,6 +67,25 @@ function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
 }
 
 /**
+ * Order 4 arbitrary quad corners as [top-left, top-right, bottom-right,
+ * bottom-left] in image space. A convex quad's corners are the points
+ * minimising/maximising x+y (TL/BR) and x−y (BL/TR). Shared by both the
+ * heuristic detector and the OpenCV contour detector.
+ */
+export function orderCorners(pts: PixelPoint[]): PixelPoint[] {
+  let tl = pts[0], br = pts[0], tr = pts[0], bl = pts[0]
+  for (const p of pts) {
+    const sum = p.x + p.y
+    const diff = p.x - p.y
+    if (sum < tl.x + tl.y) tl = p
+    if (sum > br.x + br.y) br = p
+    if (diff > tr.x - tr.y) tr = p
+    if (diff < bl.x - bl.y) bl = p
+  }
+  return [tl, tr, br, bl]
+}
+
+/**
  * Find the 4 corners of the largest felt region via extreme sums/differences:
  * a convex quad's corners are the points minimising/maximising x+y and x−y.
  * Order returned: top-left, top-right, bottom-right, bottom-left (image space).
