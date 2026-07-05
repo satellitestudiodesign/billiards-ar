@@ -58,7 +58,9 @@ table-local `(x, z + R, y)`. The XR anchor carries the table frame: +X long,
    - **VERIFY on-device (blocking before trust):** (a) `camera-access` granted on the Pixel; (b) three.js `getCameraImage`/readback vs crash issue #33404; (c) raw-camera image frustum vs render-camera frustum — if they differ the NDC mapping is biased, switch `projectToPlane` to XRView camera intrinsics (calibration knob noted in-file).
    - If the colour-threshold detector proves fragile on real felt, swap in OpenCV.js behind the `DetectQuad` interface — rest of the pipeline is unchanged. Deferred until on-device evidence it's needed (avoids an ~8 MB wasm dep speculatively).
 6. **iOS** (future) — Variant Launch SDK bridge.
-7. **License decision** — confirm GPL-3.0 distribution is acceptable, add LICENSE at repo root (currently only in `src/physics/vendor/`).
+7. **License decision** — GPL-3.0 `LICENSE` now at repo root (copied from `src/physics/vendor/`). ⚠️ Still owed: explicit confirmation that GPL-3.0 public distribution is acceptable for this project. Publishing to Pages (below) *is* distribution → repo must stay public + source available.
+
+**Deployment:** GitHub Pages via `.github/workflows/pages.yml` (build on push to `main` → publish `dist/`). URL: `https://satellitestudiodesign.github.io/billiards-ar/`. Trusted HTTPS (WebXR secure-context OK). `vite.config.ts` sets `base:'/billiards-ar/'` for build only; dev keeps `/` + mkcert https + tunnel host allowlist. One-time repo setup: Settings → Pages → Source = GitHub Actions.
 
 **Known constraints / gotchas:**
 
