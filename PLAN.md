@@ -21,17 +21,17 @@ overlays where drill balls go and plays a physics animation of the shot.
 
 ## Architecture (all in `src/`)
 
-| Module | Role |
-|---|---|
-| `appStore.ts` | zustand state machine: `registering → confirming → ready → animating` (discriminated union `Phase`) |
-| `registration/fitRectangle.ts` | pure math: 4 noisy taps → plane fit → CCW order → 2D Kabsch per size class → best `RectFit` (center, quaternion, rms). Fully unit-tested. |
-| `physics/index.ts` | **only** file the app imports physics from: `configureTableSize`, `tableLayout`, `simulate(balls, shot) → {duration, events, stateAt(t)}` |
-| `physics/vendor/**` | tailuge/billiards physics, headless-stripped, `@ts-nocheck`, GPL-3.0. Don't edit equations; re-vendor to update. |
-| `drills/drills.ts` | drill defs in fractional table coords (scale to any size); ghost-ball aiming for pocket shots |
-| `xr/` | `xrStore` singleton (hitTest+anchors+domOverlay), `reticleState` (jitter-averaged hit-test pose, non-React) |
-| `scene/` | `ARScene` (phase router) → `RegistrationScene` (reticle + tap corners) / `AnchoredTable` (XR anchor at fit pose, falls back to plain group) → `TableContents` + `DrillBalls` (useFrame-driven playback) |
-| `ui/Overlay.tsx` | `XRDomOverlay` HTML UI per phase; `beforexrselect` preventDefault so UI taps don't place corners |
-| `DebugApp.tsx` | `?debug` desktop route: table + drills + playback with OrbitControls, no phone needed |
+| Module                         | Role                                                                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `appStore.ts`                  | zustand state machine: `registering → confirming → ready → animating` (discriminated union `Phase`)                                                                                                     |
+| `registration/fitRectangle.ts` | pure math: 4 noisy taps → plane fit → CCW order → 2D Kabsch per size class → best `RectFit` (center, quaternion, rms). Fully unit-tested.                                                               |
+| `physics/index.ts`             | **only** file the app imports physics from: `configureTableSize`, `tableLayout`, `simulate(balls, shot) → {duration, events, stateAt(t)}`                                                               |
+| `physics/vendor/**`            | tailuge/billiards physics, headless-stripped, `@ts-nocheck`, GPL-3.0. Don't edit equations; re-vendor to update.                                                                                        |
+| `drills/drills.ts`             | drill defs in fractional table coords (scale to any size); ghost-ball aiming for pocket shots                                                                                                           |
+| `xr/`                          | `xrStore` singleton (hitTest+anchors+domOverlay), `reticleState` (jitter-averaged hit-test pose, non-React)                                                                                             |
+| `scene/`                       | `ARScene` (phase router) → `RegistrationScene` (reticle + tap corners) / `AnchoredTable` (XR anchor at fit pose, falls back to plain group) → `TableContents` + `DrillBalls` (useFrame-driven playback) |
+| `ui/Overlay.tsx`               | `XRDomOverlay` HTML UI per phase; `beforexrselect` preventDefault so UI taps don't place corners                                                                                                        |
+| `DebugApp.tsx`                 | `?debug` desktop route: table + drills + playback with OrbitControls, no phone needed                                                                                                                   |
 
 Frames: physics/table frame is x = long axis, y = short axis, z = up, origin =
 table center (meters). Render layer maps physics `(x, y, z)` → three.js
@@ -41,6 +41,7 @@ table-local `(x, z + R, y)`. The XR anchor carries the table frame: +X long,
 ## State — updated 2026-07-04 (session 1)
 
 **Done (alpha):**
+
 - Scaffold, deps installed, `tsc` clean, `vite build` green.
 - Physics vendored + adapter; **14/14 vitest green** (`npm test`): geometry, determinism, draw/follow, cushion, pot, clamping + fitRectangle noise/orientation/size-disambiguation suite.
 - Full AR flow implemented (not yet phone-tested): Enter AR → reticle → 4 taps → fit + size confirm (RMS shown) → anchor → table overlay → drill select → play/replay.
@@ -48,19 +49,21 @@ table-local `(x, z + R, y)`. The XR anchor carries the table frame: +X long,
 - Desktop debug route works end-to-end: `npm run dev` → `https://localhost:5173/?debug`.
 
 **Not done / next steps (in order):**
+
 1. **Phone smoke test (M0-on-device)** — Pixel/Android Chrome: cert flow, reticle tracks felt, `beforexrselect` actually suppresses UI-tap corner placement (fallback if flaky: ignore `select` within 300ms of overlay pointerdown), anchor stability walking around. See README checklist.
 2. **Registration accuracy pass** — register a real table, put a real ball on the foot spot, compare with rendered spot (target ≤ 2–3 cm). Tune reticle averaging window if needed.
-3. **UX polish** — corner markers numbered, "tracking lost" toast, animation-finished state (auto show Replay), sounds on events (`Simulation.events` already carries collision/cushion/pot times).
+3. **UX polish** — corner markers numbered, "tracking lost" toast, animation-finished state (auto show Replay). (No sounds — dropped by user decision 2026-07-05.)
 4. **Real-ball layout check** (future) — detect real ball positions vs drill start layout.
-5. **CV auto-registration v2** (future) — WebXR raw camera access + OpenCV.js in worker → same 4-corner output as taps. Check three.js `getCameraTexture` crash (issue #33404) vs pinned versions before starting.
+5. **CV auto-registration** (implemented, pending device test) — optional "✨ Auto-detect" button in the registering phase. Pipeline in `src/registration/cv/`: `captureFrame` (WebXR raw camera → RGBA, needs `camera-access` optional feature, added in `xrStore`) → `detectQuad` (felt colour-threshold + extreme-point corners, pure/tested, dependency-free — **not** OpenCV yet) → `projectToPlane` (back-project onto the reticle's hit-test plane, pure/tested) → `submitCorners` → same fit path as manual taps. Degrades to manual on any failure.
+   - **VERIFY on-device (blocking before trust):** (a) `camera-access` granted on the Pixel; (b) three.js `getCameraImage`/readback vs crash issue #33404; (c) raw-camera image frustum vs render-camera frustum — if they differ the NDC mapping is biased, switch `projectToPlane` to XRView camera intrinsics (calibration knob noted in-file).
+   - If the colour-threshold detector proves fragile on real felt, swap in OpenCV.js behind the `DetectQuad` interface — rest of the pipeline is unchanged. Deferred until on-device evidence it's needed (avoids an ~8 MB wasm dep speculatively).
 6. **iOS** (future) — Variant Launch SDK bridge.
 7. **License decision** — confirm GPL-3.0 distribution is acceptable, add LICENSE at repo root (currently only in `src/physics/vendor/`).
 
 **Known constraints / gotchas:**
+
 - One table size at a time: vendored geometry is global static (`configureTableSize`). Fine for this app.
 - `Ball.id` is a global counter upstream; `simulate()` resets it for determinism.
 - Never render/move `<XROrigin>` — anchor creation uses `relativeTo:'world'` and assumes scene coords == XR reference space.
 - Vendored physics rolls long (low rolling resistance): drills can run ~10s; head-on layouts can re-collide off the foot rail (that's real physics, design drills accordingly).
 - Emulator (IWER, auto on localhost) validates logic but not handheld taps/DOM overlay.
-
-**Org policy reminders (Global Fishing Watch):** review the GFW AI policies; the human owns this content — read and understand the vendored physics and the registration math before production; ask for sources and double-check AI claims (table dims marked `// VERIFY vs WPA specs` in `fitRectangle.ts`).

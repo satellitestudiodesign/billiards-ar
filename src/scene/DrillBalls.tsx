@@ -30,6 +30,7 @@ export function DrillBalls() {
   const meshRefs = useRef<(Mesh | null)[]>([])
   const textures = useTexture(BALL_TEXTURE_URLS)
 
+
   const active = phase.name === 'ready' || phase.name === 'animating'
   const drill = active ? (DRILLS.find((d) => d.id === phase.drillId) ?? DRILLS[0]) : null
   const sizeClass = active ? phase.fit.sizeClass : null

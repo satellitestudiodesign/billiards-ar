@@ -65,6 +65,11 @@ export function Overlay() {
               (where the cushion noses meet) and tap the screen. Go around the table in order.
             </Hint>
             <div style={row}>
+              {phase.corners.length === 0 && (
+                <button style={btnPrimary} onClick={store.requestAutoDetect}>
+                  ✨ Auto-detect
+                </button>
+              )}
               {phase.corners.length > 0 && (
                 <button style={btn} onClick={store.undoCorner}>
                   Undo corner
