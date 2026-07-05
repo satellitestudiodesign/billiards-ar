@@ -3,6 +3,7 @@ import { XRDomOverlay, useXRStore } from '@react-three/xr'
 import { useAppStore } from '../appStore'
 import { DRILLS } from '../drills/drills'
 import { PLAYING_LENGTH, type SizeClass } from '../registration/fitRectangle'
+import { markOverlayTap } from './overlayGuard'
 
 const panel: CSSProperties = {
   position: 'absolute',
@@ -55,7 +56,7 @@ export function Overlay() {
 
   return (
     <XRDomOverlay>
-      <div ref={rootRef} style={panel}>
+      <div ref={rootRef} style={panel} onPointerDownCapture={markOverlayTap}>
         {message && <Hint>⚠️ {message}</Hint>}
 
         {phase.name === 'registering' && (

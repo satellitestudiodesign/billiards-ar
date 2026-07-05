@@ -8,6 +8,7 @@ import { reticle } from '../xr/reticleState'
 import { captureCameraFrame } from '../registration/cv/captureFrame'
 import { detectQuad } from '../registration/cv/detectQuad'
 import { planeFromPose, projectToPlane } from '../registration/cv/projectToPlane'
+import { overlayTappedRecently } from '../ui/overlayGuard'
 
 const scratchMatrix = new Matrix4()
 
@@ -78,6 +79,8 @@ export function RegistrationScene() {
     'all',
     'select',
     () => {
+      // Ignore selects that are really UI taps (beforexrselect fallback).
+      if (overlayTappedRecently()) return
       if (phase.name === 'registering' && reticle.visible) {
         addCorner(reticle.position)
       }

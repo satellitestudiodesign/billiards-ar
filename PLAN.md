@@ -50,7 +50,7 @@ table-local `(x, z + R, y)`. The XR anchor carries the table frame: +X long,
 
 **Not done / next steps (in order):**
 
-1. **Phone smoke test (M0-on-device)** — Pixel/Android Chrome: cert flow, reticle tracks felt, `beforexrselect` actually suppresses UI-tap corner placement (fallback if flaky: ignore `select` within 300ms of overlay pointerdown), anchor stability walking around. See README checklist.
+1. **Phone smoke test (M0-on-device)** — Pixel/Android Chrome: cert flow, reticle tracks felt, anchor stability walking around. See README checklist. NOTE: `beforexrselect` did NOT suppress UI-tap corner placement on-device — fallback implemented (`ui/overlayGuard.ts`: overlay panel records pointerdown, corner handler ignores `select` within 500ms). Verify the 500ms window feels right on-device.
 2. **Registration accuracy pass** — register a real table, put a real ball on the foot spot, compare with rendered spot (target ≤ 2–3 cm). Tune reticle averaging window if needed.
 3. **UX polish** — corner markers numbered, "tracking lost" toast, animation-finished state (auto show Replay). (No sounds — dropped by user decision 2026-07-05.)
 4. **Real-ball layout check** (future) — detect real ball positions vs drill start layout.
