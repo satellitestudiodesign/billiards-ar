@@ -9,6 +9,7 @@ import {
 } from './registration/fitRectangle'
 import { configureTableSize, simulate, type Simulation } from './physics'
 import { DRILLS, resolveShot } from './drills/drills'
+import { tr } from './i18n'
 
 export type Phase =
   | { name: 'registering'; corners: Vector3[] }
@@ -60,12 +61,12 @@ export const useAppStore = create<AppState>((set, get) => {
       const result = fitTableRectangle(corners)
       set({
         phase: { name: 'confirming', result, chosen: result.best.sizeClass },
-        message: result.ambiguous ? 'Similar fit for two sizes — pick your table size' : null,
+        message: result.ambiguous ? tr('ambiguous') : null,
       })
     } catch (e) {
       set({
         phase: { name: 'registering', corners: [] },
-        message: `That doesn't look like a table (${(e as Error).message}) — tap the 4 corners again`,
+        message: tr('notTable').replace('{err}', (e as Error).message),
       })
     }
   }
@@ -99,7 +100,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     requestAutoDetect() {
       if (get().phase.name !== 'registering' || get().manual) return
-      set({ autoNonce: get().autoNonce + 1, autoDetecting: true, message: 'Detecting table…' })
+      set({ autoNonce: get().autoNonce + 1, autoDetecting: true, message: tr('detecting') })
     },
 
   undoCorner() {

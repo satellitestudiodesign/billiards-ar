@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { Button, ChakraProvider } from '@chakra-ui/react'
 import { XRDomOverlay, useXRStore } from '@react-three/xr'
 import { useAppStore } from '../appStore'
+import { useDrillText, useT } from '../i18n'
 import { DRILLS } from '../drills/drills'
 import { PLAYING_LENGTH, type SizeClass } from '../registration/fitRectangle'
 import { system } from '../system'
@@ -28,6 +29,8 @@ function Hint({ children }: { children: ReactNode }) {
 
 /** 2D HTML UI composited over the camera feed via WebXR DOM overlay. */
 export function Overlay() {
+  const t = useT()
+  const drillText = useDrillText()
   const phase = useAppStore((s) => s.phase)
   const message = useAppStore((s) => s.message)
   const store = useAppStore()
@@ -51,8 +54,8 @@ export function Overlay() {
       <OverlayRoot>
         <div ref={rootRef} onPointerDownCapture={markOverlayTap}>
           <div className={styles.topbar}>
-            <div className={styles.title}>Detect table</div>
-            <Button variant="ghost" size="lg" boxSize="48px" aria-label="Close" onClick={endSession}>
+            <div className={styles.title}>{t('detectTable')}</div>
+            <Button variant="ghost" size="lg" boxSize="48px" aria-label={t('close')} onClick={endSession}>
               ✕
             </Button>
           </div>
@@ -61,30 +64,22 @@ export function Overlay() {
             {store.manual ? (
               <>
                 <Hint>
-                  {message ?? (
-                    <>
-                      Aim the ring at corner <b>{phase.corners.length + 1} of 4</b> of the playing
-                      surface (where the cushion noses meet) and tap the screen. Go around the table
-                      in order.
-                    </>
-                  )}
+                  {message ?? t('manualHint').replace('{n}', String(phase.corners.length + 1))}
                 </Hint>
                 {phase.corners.length > 0 && (
                   <div className={styles.row}>
                     <Button variant="outline" size="sm" onClick={store.undoCorner}>
-                      Undo corner
+                      {t('undoCorner')}
                     </Button>
                   </div>
                 )}
               </>
             ) : (
               <>
-                <Hint>
-                  {message ?? 'Point your phone at the pool table and hold steady while it locks on.'}
-                </Hint>
+                <Hint>{message ?? t('autoHint')}</Hint>
                 <div className={styles.row}>
                   <Button variant="outline" size="sm" onClick={() => store.setManual(true)}>
-                    Enter corners manually
+                    {t('enterManually')}
                   </Button>
                 </div>
               </>
@@ -103,9 +98,10 @@ export function Overlay() {
         {phase.name === 'confirming' && (
           <>
             <Hint>
-              Fit: <b>{phase.chosen}</b> table, corner error{' '}
-              <b>{(currentRms(phase) * 100).toFixed(1)} cm</b>
-              {currentRms(phase) > 0.03 && ' — high, consider redoing'}
+              {t('fit')
+                .replace('{size}', phase.chosen)
+                .replace('{cm}', (currentRms(phase) * 100).toFixed(1))}
+              {currentRms(phase) > 0.03 && t('fitHigh')}
             </Hint>
             <div className={styles.row}>
               {(Object.keys(PLAYING_LENGTH) as SizeClass[]).map((sz) => (
@@ -121,10 +117,10 @@ export function Overlay() {
             </div>
             <div className={styles.row}>
               <Button size="sm" onClick={store.acceptFit}>
-                Looks right
+                {t('looksRight')}
               </Button>
               <Button size="sm" variant="outline" onClick={store.redoRegistration}>
-                Redo corners
+                {t('redoCorners')}
               </Button>
             </div>
           </>
@@ -140,25 +136,30 @@ export function Overlay() {
                   variant={d.id === phase.drillId ? 'solid' : 'outline'}
                   onClick={() => store.selectDrill(d.id)}
                 >
-                  {d.name}
+                  {drillText(d.id).name}
                 </Button>
               ))}
             </div>
-            <Hint>{DRILLS.find((d) => d.id === phase.drillId)?.description}</Hint>
+            <Hint>
+              {(() => {
+                const d = DRILLS.find((d) => d.id === phase.drillId)
+                return d ? drillText(d.id).description : ''
+              })()}
+            </Hint>
             <div className={styles.row}>
               <Button size="sm" onClick={store.play}>
-                {phase.name === 'animating' ? '↺ Replay' : '▶ Play shot'}
+                {phase.name === 'animating' ? t('replay') : t('play')}
               </Button>
               {phase.name === 'animating' && (
                 <Button size="sm" variant="outline" onClick={store.stopAnimation}>
-                  Reset balls
+                  {t('resetBalls')}
                 </Button>
               )}
               <Button size="sm" variant="outline" onClick={store.redoRegistration}>
-                Re-register
+                {t('reRegister')}
               </Button>
               <Button size="sm" variant="outline" onClick={endSession}>
-                Exit AR
+                {t('exitAR')}
               </Button>
             </div>
           </>

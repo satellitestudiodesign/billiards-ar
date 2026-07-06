@@ -94,7 +94,10 @@ export function RegistrationScene() {
 
         consensus.add(res)
         ghost.current = { corners: consensus.medians(), visible: true }
-        useAppStore.setState({ message: `Locking on… ${consensus.count}/${LOCK.minSamples}` })
+        // Cap the numerator: past minSamples the blocker is spread (jitter),
+        // not sample count, so "11/6" would be nonsense.
+        const shown = Math.min(consensus.count, LOCK.minSamples)
+        useAppStore.setState({ message: `Locking on… ${shown}/${LOCK.minSamples}` })
         if (consensus.count >= LOCK.minSamples && consensus.spread() <= LOCK.maxSpread) {
           ghost.current.visible = false
           useAppStore.setState({ autoDetecting: false })
@@ -151,7 +154,11 @@ export function RegistrationScene() {
   useFrame(() => {
     const gg = ghostGroupRef.current
     if (gg) {
-      gg.visible = ghost.current.visible && ghost.current.corners.length === 4
+      // Hide the lock-on ghost in manual mode — those blue dots are auto-only.
+      gg.visible =
+        !useAppStore.getState().manual &&
+        ghost.current.visible &&
+        ghost.current.corners.length === 4
       if (gg.visible) ghost.current.corners.forEach((c, i) => gg.children[i]?.position.copy(c))
     }
 

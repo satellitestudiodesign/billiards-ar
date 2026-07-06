@@ -7,8 +7,7 @@ import { tableLayout, type ShotParams } from '../physics'
  */
 export interface Drill {
   id: string
-  name: string
-  description: string
+  /** Display name/description live in i18n.ts, keyed by id. */
   /** balls[0] is the cue (no num); object balls carry their number (1..15). */
   balls: Array<{ x: number; y: number; num?: number }>
   shot: { speed: number; side: number; vertical: number } & (
@@ -20,8 +19,6 @@ export interface Drill {
 export const DRILLS: Drill[] = [
   {
     id: 'stop',
-    name: 'Stop shot',
-    description: 'Pot the 1 in the corner; the cue ball should stop dead on contact.',
     // On the centre→NE-corner diagonal (fx = fy lies on that line), so the
     // head-on hit sends the 1 into the corner and shows the cue action.
     balls: [
@@ -32,8 +29,6 @@ export const DRILLS: Drill[] = [
   },
   {
     id: 'draw',
-    name: 'Draw shot',
-    description: 'Pot the 1 in the corner; heavy backspin draws the cue ball back.',
     balls: [
       { x: -0.2, y: -0.2 },
       { x: 0.25, y: 0.25, num: 1 },
@@ -42,8 +37,6 @@ export const DRILLS: Drill[] = [
   },
   {
     id: 'cut-corner',
-    name: 'Cut to corner',
-    description: 'Cut the object ball into the far corner pocket.',
     balls: [
       { x: -0.2, y: -0.15 },
       { x: 0.15, y: 0.1, num: 1 },
@@ -52,8 +45,6 @@ export const DRILLS: Drill[] = [
   },
   {
     id: '9ball-break',
-    name: '9-ball break',
-    description: 'Full-speed break into a diamond rack from the head string.',
     // Diamond rack (1,2,3,2,1). 9-ball convention: the diamond centre (the
     // 9) sits on the foot spot (fx 0.25); the apex 1-ball is higher, toward
     // the cue. balls[1] is the apex 1-ball. Spacing is baked at 9ft with a
@@ -78,8 +69,6 @@ export const DRILLS: Drill[] = [
   },
   {
     id: '9ball-break-other',
-    name: '9-ball break (other side)',
-    description: 'Same break from one ball off the opposite side rail (mirrored in y).',
     // Rack is symmetric about y=0, so the mirror just flips the cue and aim.
     balls: [
       { x: -0.25, y: -0.43 }, // cue: one ball off the far side rail

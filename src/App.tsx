@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Heading, Link, Text } from '@chakra-ui/react'
 import { Canvas } from '@react-three/fiber'
 import { IfInSessionMode, XR } from '@react-three/xr'
+import { useI18n, useT, type Lang } from './i18n'
 import { xrStore } from './xr/xrStore'
 import { ARScene } from './scene/ARScene'
 import { Overlay } from './ui/Overlay'
@@ -18,7 +19,27 @@ export function App() {
   return <ARApp />
 }
 
+function LangSelector() {
+  const lang = useI18n((s) => s.lang)
+  const setLang = useI18n((s) => s.setLang)
+  return (
+    <div style={{ position: 'fixed', top: 16, right: 16, display: 'flex', gap: 8, zIndex: 10 }}>
+      {(['en', 'es'] as Lang[]).map((l) => (
+        <Button
+          key={l}
+          size="sm"
+          variant={l === lang ? 'solid' : 'outline'}
+          onClick={() => setLang(l)}
+        >
+          {l.toUpperCase()}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
 function ARApp() {
+  const t = useT()
   const [supported, setSupported] = useState<boolean | null>(null)
   useEffect(() => {
     if (!navigator.xr) {
@@ -34,24 +55,23 @@ function ARApp() {
   return (
     <>
       <div className={styles.intro}>
-        <Heading size="2xl">AR Billiards Trainer</Heading>
+        <LangSelector />
+        <Heading size="2xl">{t('title')}</Heading>
         <Text maxW="420px" opacity={0.8}>
-          Point your phone at a pool table, tap its four corners, and watch training drills play
-          out on the real table.
+          {t('intro')}
         </Text>
         <Button size="lg" onClick={() => xrStore.enterAR()}>
-          Enter AR
+          {t('enterAR')}
         </Button>
         {supported === false && (
           <Text maxW="420px" color="orange.300">
-            WebXR AR is not available in this browser. Use Chrome on Android. (iOS Safari has no
-            WebXR yet.)
+            {t('notSupported')}
           </Text>
         )}
         <Text fontSize="sm" opacity={0.5}>
-          Desktop? Try the{' '}
+          {t('desktopPrefix')}
           <Link href="?debug" colorPalette="blue">
-            debug table view
+            {t('debugLink')}
           </Link>
           .
         </Text>

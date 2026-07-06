@@ -6,6 +6,7 @@ import { TableContents } from './scene/TableContents'
 import { DrillBalls } from './scene/DrillBalls'
 import { Button } from '@chakra-ui/react'
 import { DRILLS } from './drills/drills'
+import { useDrillText } from './i18n'
 import styles from './DebugApp.module.css'
 
 /**
@@ -15,6 +16,7 @@ import styles from './DebugApp.module.css'
 export function DebugApp() {
   const phase = useAppStore((s) => s.phase)
   const store = useAppStore()
+  const drillText = useDrillText()
 
   useEffect(() => {
     if (phase.name === 'registering') debugRegisterTable('9ft')
@@ -40,7 +42,7 @@ export function DebugApp() {
             variant={d.id === phase.drillId ? 'solid' : 'outline'}
             onClick={() => store.selectDrill(d.id)}
           >
-            {d.name}
+            {drillText(d.id).name}
           </Button>
         ))}
         <Button size="sm" colorPalette="green" onClick={store.play}>
