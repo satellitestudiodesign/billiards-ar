@@ -3,6 +3,7 @@ import { XRSpace, useXRAnchor } from '@react-three/xr'
 import type { RectFit } from '../registration/fitRectangle'
 import { TableContents } from './TableContents'
 import { DrillBalls } from './DrillBalls'
+import { RefinedGroup } from './RefinedGroup'
 
 /**
  * Creates one XR anchor at the fitted table pose and renders all table-local
@@ -24,11 +25,13 @@ export function AnchoredTable({ fit }: { fit: RectFit }) {
     })
   }, [fit, requestAnchor])
 
+  // RefinedGroup continuously re-detects the felt and low-passes small pose
+  // corrections, cancelling anchor drift and residual registration bias.
   const contents = (
-    <>
+    <RefinedGroup fit={fit}>
       <TableContents sizeClass={fit.sizeClass} />
       <DrillBalls />
-    </>
+    </RefinedGroup>
   )
 
   if (anchor) {

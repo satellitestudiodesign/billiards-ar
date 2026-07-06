@@ -8,7 +8,10 @@
  * HSV `inRange` mask around that colour → morphological close/open to fill
  * ball/glare holes and drop specks → largest external contour →
  * `approxPolyDP` to a 4-gon, with a `minAreaRect` fallback when the contour
- * won't reduce cleanly to four vertices.
+ * won't reduce cleanly to four vertices → rail-line refinement: fit the 4
+ * rail edge lines through the dense contour and intersect them, recovering
+ * sub-pixel corners even where pockets/balls occlude the physical corner
+ * (see railLines.ts; falls back to the rough 4-gon when unsupported).
  *
  * Async because the wasm loads on demand. Returns null on any failure (wasm
  * unavailable, no confident region) so the caller can fall back to the
@@ -21,6 +24,7 @@
 import type { Mat } from '@techstark/opencv-js'
 import { loadOpenCv } from './opencv'
 import { orderCorners, type PixelPoint } from './detectQuad'
+import { refineRailCorners } from './railLines'
 
 export interface CvDetection {
   corners: PixelPoint[]
@@ -110,20 +114,21 @@ export async function detectQuadCv(
 
     const contours = keep(new cv.MatVector())
     const hierarchy = keep(new cv.Mat())
-    cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    // CHAIN_APPROX_NONE: rail-line refinement below wants every boundary
+    // pixel, not just segment endpoints.
+    cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
 
-    // Largest contour by area = the felt.
+    // Largest contour by area = the felt. Every cnt goes into the trash (never
+    // delete inline — a Mat both hand-deleted and in the trash gets a second
+    // delete() on the wasm heap in `finally`).
     let bestCnt: Mat | null = null
     let bestArea = 0
     for (let i = 0; i < contours.size(); i++) {
-      const cnt = contours.get(i)
+      const cnt = keep(contours.get(i))
       const area = cv.contourArea(cnt)
       if (!bestCnt || area > bestArea) {
-        if (bestCnt) bestCnt.delete()
-        bestCnt = keep(cnt)
+        bestCnt = cnt
         bestArea = area
-      } else {
-        cnt.delete()
       }
     }
     if (!bestCnt) return null
@@ -136,6 +141,7 @@ export async function detectQuadCv(
     const peri = cv.arcLength(bestCnt, true)
     cv.approxPolyDP(bestCnt, approx, 0.02 * peri, true)
 
+    // Rough quad in cyclic order (both approxPolyDP and boxPoints are cyclic).
     let pts: PixelPoint[]
     if (approx.rows === 4) {
       const d = approx.data32S
@@ -144,7 +150,15 @@ export async function detectQuadCv(
       pts = cv.boxPoints(cv.minAreaRect(bestCnt)).map((p) => ({ x: p.x, y: p.y }))
     }
 
-    return { corners: orderCorners(pts), coverage }
+    // Precision pass: rail lines through the dense contour → intersections.
+    // Rough vertices land on pocket arcs (cm-level bias); line intersections
+    // recover the occluded true corner. Falls back to rough on any doubt.
+    const cd = bestCnt.data32S
+    const contourPts: PixelPoint[] = []
+    for (let i = 0; i < bestCnt.rows; i++) contourPts.push({ x: cd[i * 2], y: cd[i * 2 + 1] })
+    const refined = refineRailCorners(contourPts, pts, width, height)
+
+    return { corners: orderCorners(refined ?? pts), coverage }
   } catch {
     return null
   } finally {

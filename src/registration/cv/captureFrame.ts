@@ -38,6 +38,16 @@ export interface CameraCapture {
   view: number[]
 }
 
+// Reused across captures: the lock-on loop calls this at frame rate, and
+// allocating ~20 MB of fresh buffers per pass (raw + flipped at full camera
+// res) produced enough GC/heap churn to OOM-crash the tab on-device. Capture
+// is strictly sequential (callers guard with busy flags), so one set of
+// buffers is safe. NOTE: the returned ImageData aliases `flipBuf` — it is
+// only valid until the next captureCameraFrame call.
+let rawBuf = new Uint8Array(0)
+let flipBuf = new Uint8ClampedArray(0)
+let bindingCache: { session: XRSession; binding: XRWebGLBinding } | null = null
+
 /** Wait for one XRFrame, or null if none arrives within `timeoutMs`. */
 function nextFrame(session: XRSession, timeoutMs = 500): Promise<XRFrame | null> {
   return new Promise((resolve) => {
@@ -66,8 +76,10 @@ export async function captureCameraFrame(renderer: WebGLRenderer): Promise<Camer
     const xrCamera = view?.camera
     if (!view || !xrCamera) return null // raw-camera-access not granted/supported
 
-    const binding = new XRWebGLBinding(session, gl)
-    const texture = binding.getCameraImage(xrCamera)
+    if (bindingCache?.session !== session) {
+      bindingCache = { session, binding: new XRWebGLBinding(session, gl) }
+    }
+    const texture = bindingCache.binding.getCameraImage(xrCamera)
     if (!texture) return null
     const { width, height } = xrCamera
 
@@ -80,13 +92,16 @@ export async function captureCameraFrame(renderer: WebGLRenderer): Promise<Camer
       gl.deleteFramebuffer(fbo)
       return null
     }
-    const raw = new Uint8Array(width * height * 4)
+    const bytes = width * height * 4
+    if (rawBuf.length !== bytes) rawBuf = new Uint8Array(bytes)
+    const raw = rawBuf
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, raw)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.deleteFramebuffer(fbo)
 
     // readPixels origin is bottom-left; ImageData is top-left. Flip rows.
-    const flipped = new Uint8ClampedArray(width * height * 4)
+    if (flipBuf.length !== bytes) flipBuf = new Uint8ClampedArray(bytes)
+    const flipped = flipBuf
     const rowBytes = width * 4
     for (let y = 0; y < height; y++) {
       const src = (height - 1 - y) * rowBytes

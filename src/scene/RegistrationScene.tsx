@@ -5,16 +5,10 @@ import { Billboard, Text } from '@react-three/drei'
 import { useXRHitTest, useXRInputSourceEvent } from '@react-three/xr'
 import { useAppStore } from '../appStore'
 import { reticle } from '../xr/reticleState'
-import { captureCameraFrame } from '../registration/cv/captureFrame'
-import { detectQuad } from '../registration/cv/detectQuad'
-import { detectQuadCv } from '../registration/cv/detectQuadCv'
+import { detectTableCorners } from '../registration/cv/detectTable'
 import { preloadOpenCv } from '../registration/cv/opencv'
-import {
-  cameraFromCapture,
-  planeFromPose,
-  projectToPlane,
-  type ProjectDiag,
-} from '../registration/cv/projectToPlane'
+import { planeFromPose } from '../registration/cv/projectToPlane'
+import { CornerConsensus } from '../registration/cornerConsensus'
 import { overlayTappedRecently } from '../ui/overlayGuard'
 
 const scratchMatrix = new Matrix4()
@@ -22,6 +16,25 @@ const scratchMatrix = new Matrix4()
 const TRACK_LOST = 'Move the phone slowly over the felt — no surface detected'
 /** How long the reticle must miss before the tracking-lost toast shows (ms). */
 const TRACK_LOST_DELAY = 1200
+
+/**
+ * Auto-detect lock-on tuning. One-shot detection is fragile (glare frame,
+ * arm over a rail); instead we sample detections for up to `timeoutMs` and
+ * accept the running median once frames agree.
+ */
+const LOCK = {
+  timeoutMs: 4000,
+  /** Pause between detection passes. Detecting at full frame rate buys
+   *  nothing (consensus needs ~6 samples) and the capture+CV churn at that
+   *  rate OOM-crashed the tab on-device. */
+  intervalMs: 150,
+  /** Samples + agreement required for a confident early lock. */
+  minSamples: 6,
+  maxSpread: 0.015, // m
+  /** Timeout fallback: accept a looser consensus rather than fail outright. */
+  minTimeoutSamples: 3,
+  okSpread: 0.03, // m
+}
 
 /**
  * Corner-tapping flow: a viewer hit-test reticle at screen center; each
@@ -40,9 +53,16 @@ export function RegistrationScene() {
     preloadOpenCv()
   }, [])
 
-  // CV auto-registration: on each requestAutoDetect() (autoNonce bump), grab a
-  // camera frame, detect the felt quad, back-project onto the reticle's plane,
-  // and submit the 4 world corners. Any failure falls back to manual tapping.
+  // Live consensus preview: the lock-on loop writes the running median corners
+  // here; useFrame mirrors them onto 4 ghost markers so the user sees the
+  // detection converge ("lock on") in place.
+  const ghost = useRef<{ corners: Vector3[]; visible: boolean }>({ corners: [], visible: false })
+  const ghostGroupRef = useRef<Group>(null)
+
+  // CV auto-registration lock-on: on each requestAutoDetect() (autoNonce bump),
+  // sample camera-frame detections for up to LOCK.timeoutMs, back-projecting
+  // each onto the reticle's plane and feeding a CornerConsensus. Submit the
+  // median corners once frames agree; any failure falls back to manual tapping.
   useEffect(() => {
     if (autoNonce === 0) return
     let cancelled = false
@@ -51,36 +71,49 @@ export function RegistrationScene() {
     }
     ;(async () => {
       if (!reticle.visible) return fail('Point the ring at the felt first, then Auto-detect')
-      // Felt plane from the reticle pose (world space) — independent of camera.
-      const normal = new Vector3(0, 1, 0).applyQuaternion(reticle.quaternion)
-      const plane = planeFromPose(reticle.position, normal)
+      const consensus = new CornerConsensus()
+      const deadline = performance.now() + LOCK.timeoutMs
 
-      const cap = await captureCameraFrame(gl)
-      if (cancelled) return
-      if (!cap) return fail('Auto-detect unavailable on this device — tap the 4 corners')
+      while (!cancelled && performance.now() < deadline) {
+        await new Promise((r) => setTimeout(r, LOCK.intervalMs))
+        if (cancelled) return
+        // Fresh plane each pass — the jitter-averaged reticle keeps improving
+        // (and keeps its last pose during brief tracking misses).
+        const normal = new Vector3(0, 1, 0).applyQuaternion(reticle.quaternion)
+        const plane = planeFromPose(reticle.position, normal)
 
-      // Advanced OpenCV detector first; fall back to the heuristic one if the
-      // wasm didn't load or it found nothing.
-      const cv = await detectQuadCv(cap.image)
-      if (cancelled) return
-      const quad = cv?.corners ?? detectQuad(cap.image)
-      if (!quad) return fail("Couldn't find the felt — aim at the whole table or tap the 4 corners")
+        // detectTableCorners awaits an XRFrame internally, so this loop is
+        // frame-paced, not a busy spin.
+        const res = await detectTableCorners(gl, plane)
+        if (cancelled) return
+        if (res === 'no-camera') {
+          ghost.current.visible = false
+          return fail('Auto-detect unavailable on this device — tap the 4 corners')
+        }
+        if (typeof res === 'string') continue // transient miss — keep sampling
 
-      // Back-project through the exact XRView frustum the image was captured
-      // through (fixes the FOV-mismatch bias).
-      const cam = cameraFromCapture(cap)
-      const diag: ProjectDiag = { ndc: [], missedAt: -1 }
-      const world = projectToPlane(quad, cap.width, cap.height, cam, plane, diag)
-      if (!world) {
-        const c = quad[diag.missedAt] ?? quad[0]
-        return fail(
-          `Table not in view — tap the 4 corners (corner ${diag.missedAt + 1} off-plane @ ${Math.round(c.x)},${Math.round(c.y)} of ${cap.width}×${cap.height})`,
-        )
+        consensus.add(res)
+        ghost.current = { corners: consensus.medians(), visible: true }
+        useAppStore.setState({ message: `Locking on… ${consensus.count}/${LOCK.minSamples}` })
+        if (consensus.count >= LOCK.minSamples && consensus.spread() <= LOCK.maxSpread) {
+          ghost.current.visible = false
+          useAppStore.getState().submitCorners(consensus.medians())
+          return
+        }
       }
-      if (!cancelled) useAppStore.getState().submitCorners(world)
+
+      ghost.current.visible = false
+      if (cancelled) return
+      // Timed out: accept a looser consensus over failing outright.
+      if (consensus.count >= LOCK.minTimeoutSamples && consensus.spread() <= LOCK.okSpread) {
+        useAppStore.getState().submitCorners(consensus.medians())
+        return
+      }
+      fail("Couldn't lock onto the table — aim at the whole table or tap the 4 corners")
     })()
     return () => {
       cancelled = true
+      ghost.current.visible = false
     }
   }, [autoNonce, gl])
   // Tracking-lost toast: track when the reticle first started missing and
@@ -111,6 +144,12 @@ export function RegistrationScene() {
   )
 
   useFrame(() => {
+    const gg = ghostGroupRef.current
+    if (gg) {
+      gg.visible = ghost.current.visible && ghost.current.corners.length === 4
+      if (gg.visible) ghost.current.corners.forEach((c, i) => gg.children[i]?.position.copy(c))
+    }
+
     const g = reticleRef.current
     if (!g) return
     g.visible = reticle.visible
@@ -153,6 +192,16 @@ export function RegistrationScene() {
           <ringGeometry args={[0.001, 0.004, 16]} />
           <meshBasicMaterial color="#ffffff" />
         </mesh>
+      </group>
+      {/* Lock-on ghost: running median of the auto-detect consensus. Watching
+          these settle onto the real corners is the "locking on" feedback. */}
+      <group ref={ghostGroupRef} visible={false}>
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={i}>
+            <sphereGeometry args={[0.015, 12, 12]} />
+            <meshBasicMaterial color="#00e5ff" transparent opacity={0.8} />
+          </mesh>
+        ))}
       </group>
       {corners.map((c, i) => (
         <group key={i} position={c}>
