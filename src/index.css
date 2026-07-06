@@ -1,0 +1,17 @@
+body {
+  margin: 0;
+  width: 100dvw;
+  height: 100dvh;
+  overflow: hidden;
+  touch-action: none;
+  background: #101014;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+}
+
+#root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}

@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
+import { Heading, Text } from '@chakra-ui/react'
 import { detectQuadCv } from './registration/cv/detectQuadCv'
 import { detectQuad, type PixelPoint } from './registration/cv/detectQuad'
+import styles from './DetectDebug.module.css'
 
 /**
  * ?detect — desktop CV tuning route. Load a table photo, run the same
@@ -46,15 +48,19 @@ export function DetectDebug() {
   }
 
   return (
-    <div style={{ fontFamily: 'system-ui', padding: 16, color: '#eee', background: '#15151c', minHeight: '100vh' }}>
-      <h2 style={{ marginTop: 0 }}>Felt detector tuning (?detect)</h2>
+    <div className={styles.root}>
+      <Heading size="lg" mb={4}>
+        Felt detector tuning (?detect)
+      </Heading>
       <input
         type="file"
         accept="image/*"
         onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
       />
-      <p style={{ fontSize: 14, opacity: 0.85 }}>{info}</p>
-      <canvas ref={canvasRef} style={{ maxWidth: '100%', border: '1px solid #333' }} />
+      <Text fontSize="sm" opacity={0.85} my={3}>
+        {info}
+      </Text>
+      <canvas ref={canvasRef} className={styles.canvas} />
     </div>
   )
 }

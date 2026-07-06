@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Button, Heading, Link, Text } from '@chakra-ui/react'
 import { Canvas } from '@react-three/fiber'
 import { IfInSessionMode, XR } from '@react-three/xr'
 import { xrStore } from './xr/xrStore'
@@ -6,6 +7,7 @@ import { ARScene } from './scene/ARScene'
 import { Overlay } from './ui/Overlay'
 import { DebugApp } from './DebugApp'
 import { DetectDebug } from './DetectDebug'
+import styles from './App.module.css'
 
 export function App() {
   const params = new URLSearchParams(location.search)
@@ -31,49 +33,30 @@ function ARApp() {
 
   return (
     <>
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 16,
-          textAlign: 'center',
-          padding: 24,
-          zIndex: 1,
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 28 }}>AR Billiards Trainer</h1>
-        <p style={{ maxWidth: 420, opacity: 0.8 }}>
+      <div className={styles.intro}>
+        <Heading size="2xl">AR Billiards Trainer</Heading>
+        <Text maxW="420px" opacity={0.8}>
           Point your phone at a pool table, tap its four corners, and watch training drills play
           out on the real table.
-        </p>
-        <button
-          onClick={() => xrStore.enterAR()}
-          style={{
-            padding: '14px 28px',
-            fontSize: 18,
-            borderRadius: 12,
-            border: 'none',
-            background: '#2b6bff',
-            color: '#fff',
-          }}
-        >
+        </Text>
+        <Button size="lg" onClick={() => xrStore.enterAR()}>
           Enter AR
-        </button>
+        </Button>
         {supported === false && (
-          <p style={{ color: '#ff8866', maxWidth: 420 }}>
+          <Text maxW="420px" color="orange.300">
             WebXR AR is not available in this browser. Use Chrome on Android. (iOS Safari has no
             WebXR yet.)
-          </p>
+          </Text>
         )}
-        <p style={{ opacity: 0.5, fontSize: 13 }}>
-          Desktop? Try the <a href="?debug" style={{ color: '#7db4ff' }}>debug table view</a>.
-        </p>
+        <Text fontSize="sm" opacity={0.5}>
+          Desktop? Try the{' '}
+          <Link href="?debug" colorPalette="blue">
+            debug table view
+          </Link>
+          .
+        </Text>
       </div>
-      <Canvas style={{ position: 'absolute', inset: 0 }}>
+      <Canvas className={styles.canvas}>
         <XR store={xrStore}>
           <IfInSessionMode allow="immersive-ar">
             <ambientLight intensity={1} />

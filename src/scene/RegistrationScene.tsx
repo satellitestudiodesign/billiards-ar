@@ -67,16 +67,16 @@ export function RegistrationScene() {
     if (autoNonce === 0) return
     let cancelled = false
     const fail = (msg: string) => {
-      if (!cancelled) useAppStore.setState({ message: msg })
+      if (!cancelled) useAppStore.setState({ message: msg, autoDetecting: false })
     }
     ;(async () => {
-      if (!reticle.visible) return fail('Point the ring at the felt first, then Auto-detect')
+      if (!reticle.visible) return fail('Point the phone at the table')
       const consensus = new CornerConsensus()
       const deadline = performance.now() + LOCK.timeoutMs
 
       while (!cancelled && performance.now() < deadline) {
         await new Promise((r) => setTimeout(r, LOCK.intervalMs))
-        if (cancelled) return
+        if (cancelled || useAppStore.getState().manual) return
         // Fresh plane each pass — the jitter-averaged reticle keeps improving
         // (and keeps its last pose during brief tracking misses).
         const normal = new Vector3(0, 1, 0).applyQuaternion(reticle.quaternion)
@@ -97,7 +97,8 @@ export function RegistrationScene() {
         useAppStore.setState({ message: `Locking on… ${consensus.count}/${LOCK.minSamples}` })
         if (consensus.count >= LOCK.minSamples && consensus.spread() <= LOCK.maxSpread) {
           ghost.current.visible = false
-          useAppStore.getState().submitCorners(consensus.medians())
+          useAppStore.setState({ autoDetecting: false })
+        useAppStore.getState().submitCorners(consensus.medians())
           return
         }
       }
@@ -106,10 +107,12 @@ export function RegistrationScene() {
       if (cancelled) return
       // Timed out: accept a looser consensus over failing outright.
       if (consensus.count >= LOCK.minTimeoutSamples && consensus.spread() <= LOCK.okSpread) {
+        useAppStore.setState({ autoDetecting: false })
         useAppStore.getState().submitCorners(consensus.medians())
         return
       }
-      fail("Couldn't lock onto the table — aim at the whole table or tap the 4 corners")
+      // Retry: the frame-loop kick below re-triggers while still in auto mode.
+      fail('Move around the table so all four corners are visible')
     })()
     return () => {
       cancelled = true
@@ -121,6 +124,8 @@ export function RegistrationScene() {
   // transitions (not every frame).
   const missSince = useRef<number | null>(null)
   const toastShown = useRef(false)
+  // Throttle auto-detect re-kicks so a failed pass waits a beat before retrying.
+  const nextAutoAt = useRef(0)
 
   useXRHitTest((results, getWorldMatrix) => {
     if (results.length > 0 && getWorldMatrix(scratchMatrix, results[0])) {
@@ -157,6 +162,16 @@ export function RegistrationScene() {
     g.quaternion.copy(reticle.quaternion)
 
     const now = performance.now()
+
+    // Auto-start / retry detection: while in auto mode with a locked reticle and
+    // no pass running, kick a detection loop. Failed passes clear autoDetecting,
+    // so this retries them after the cooldown.
+    const st = useAppStore.getState()
+    if (phase.name === 'registering' && !st.manual && !st.autoDetecting && reticle.visible && now >= nextAutoAt.current) {
+      nextAutoAt.current = now + 800
+      st.requestAutoDetect()
+    }
+
     if (reticle.visible) {
       missSince.current = null
       if (toastShown.current) {

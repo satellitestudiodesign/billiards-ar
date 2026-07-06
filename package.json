@@ -12,6 +12,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@chakra-ui/react": "^3.36.0",
+    "@emotion/react": "^11.14.0",
     "@react-three/drei": "^10",
     "@react-three/fiber": "^9",
     "@react-three/xr": "^6.6",

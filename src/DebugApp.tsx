@@ -4,7 +4,9 @@ import { OrbitControls } from '@react-three/drei'
 import { debugRegisterTable, useAppStore } from './appStore'
 import { TableContents } from './scene/TableContents'
 import { DrillBalls } from './scene/DrillBalls'
+import { Button } from '@chakra-ui/react'
 import { DRILLS } from './drills/drills'
+import styles from './DebugApp.module.css'
 
 /**
  * Desktop route (?debug): renders the table-local content in a plain canvas
@@ -22,10 +24,7 @@ export function DebugApp() {
 
   return (
     <>
-      <Canvas
-        style={{ position: 'absolute', inset: 0 }}
-        camera={{ position: [0, 2.2, 2], fov: 50 }}
-      >
+      <Canvas className={styles.canvas} camera={{ position: [0, 2.2, 2], fov: 50 }}>
         <color attach="background" args={['#15151c']} />
         <ambientLight intensity={1} />
         <gridHelper args={[6, 24, '#333', '#222']} />
@@ -33,52 +32,24 @@ export function DebugApp() {
         <DrillBalls />
         <OrbitControls target={[0, 0, 0]} />
       </Canvas>
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 12,
-          left: 12,
-          right: 12,
-          display: 'flex',
-          gap: 8,
-          flexWrap: 'wrap',
-          fontFamily: 'system-ui',
-        }}
-      >
+      <div className={styles.bar}>
         {DRILLS.map((d) => (
-          <button
+          <Button
             key={d.id}
+            size="sm"
+            variant={d.id === phase.drillId ? 'solid' : 'outline'}
             onClick={() => store.selectDrill(d.id)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 8,
-              border: 'none',
-              background: d.id === phase.drillId ? '#2b6bff' : '#333',
-              color: '#fff',
-            }}
           >
             {d.name}
-          </button>
+          </Button>
         ))}
-        <button
-          onClick={store.play}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: 'none',
-            background: '#1db954',
-            color: '#fff',
-          }}
-        >
+        <Button size="sm" colorPalette="green" onClick={store.play}>
           {phase.name === 'animating' ? '↺ Replay' : '▶ Play shot'}
-        </button>
+        </Button>
         {phase.name === 'animating' && (
-          <button
-            onClick={store.stopAnimation}
-            style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#555', color: '#fff' }}
-          >
+          <Button size="sm" variant="outline" onClick={store.stopAnimation}>
             Reset
-          </button>
+          </Button>
         )}
       </div>
     </>

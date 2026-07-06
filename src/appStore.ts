@@ -29,6 +29,12 @@ interface AppState {
   message: string | null
   /** Bumped by requestAutoDetect(); RegistrationScene runs the CV pipeline on change. */
   autoNonce: number
+  /** True while an auto-detect lock-on loop is in flight (RegistrationScene owns the loop). */
+  autoDetecting: boolean
+  /** User fell back to manual corner tapping (hides auto UI, stops auto retries). */
+  manual: boolean
+  /** Switch registration between auto-detect and manual corner tapping. */
+  setManual(v: boolean): void
   addCorner(p: Vector3): void
   /** Accept a full set of 4 world corners at once (CV auto-registration path). */
   submitCorners(corners: Vector3[]): void
@@ -68,6 +74,12 @@ export const useAppStore = create<AppState>((set, get) => {
     phase: { name: 'registering', corners: [] },
     message: null,
     autoNonce: 0,
+    autoDetecting: false,
+    manual: false,
+
+    setManual(v) {
+      set({ manual: v, message: null, autoDetecting: false })
+    },
 
     addCorner(p) {
       const { phase } = get()
@@ -86,8 +98,8 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     requestAutoDetect() {
-      if (get().phase.name !== 'registering') return
-      set({ autoNonce: get().autoNonce + 1, message: 'Detecting table…' })
+      if (get().phase.name !== 'registering' || get().manual) return
+      set({ autoNonce: get().autoNonce + 1, autoDetecting: true, message: 'Detecting table…' })
     },
 
   undoCorner() {
@@ -111,7 +123,7 @@ export const useAppStore = create<AppState>((set, get) => {
   },
 
   redoRegistration() {
-    set({ phase: { name: 'registering', corners: [] }, message: null })
+    set({ phase: { name: 'registering', corners: [] }, message: null, manual: false, autoDetecting: false })
   },
 
   selectDrill(id) {

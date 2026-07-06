@@ -1,0 +1,17 @@
+.intro {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  padding: 24px;
+  z-index: 1;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+}

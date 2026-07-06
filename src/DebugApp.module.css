@@ -1,0 +1,15 @@
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.bar {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: system-ui;
+}
