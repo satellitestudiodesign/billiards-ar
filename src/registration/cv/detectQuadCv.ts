@@ -61,6 +61,13 @@ export interface CvDetectOptions {
   hueTol?: number
   /** Min saturation (0..255) — reject washed-out glare/grey. */
   minSat?: number
+  /** Sampled saturation at/below this → treat felt as achromatic (grey/silver
+   *  cloth): segment by VALUE band instead of hue, since grey has no usable hue. */
+  achromaSat?: number
+  /** Value half-window (0..255) around sampled V for the achromatic branch. */
+  valTol?: number
+  /** Max saturation (0..255) a pixel may have to count as grey felt. */
+  achromaMaxSat?: number
   /** Populate the debug fields on the result (mask, rough quad, hue). */
   debug?: boolean
   /** Felt-colour sample point, fractional 0..1 of image (default centre —
@@ -69,7 +76,15 @@ export interface CvDetectOptions {
   sample?: { x: number; y: number }
 }
 
-const CV_DEFAULTS = { minCoverage: 0.06, hueTol: 25, minSat: 40, sample: { x: 0.5, y: 0.5 } }
+const CV_DEFAULTS = {
+  minCoverage: 0.06,
+  hueTol: 25,
+  minSat: 40,
+  achromaSat: 35,
+  valTol: 28,
+  achromaMaxSat: 50,
+  sample: { x: 0.5, y: 0.5 },
+}
 
 /** Single-channel mask Mat → RGBA overlay for debug. DIMS everything OUTSIDE
  *  the felt (felt shows through, non-felt darkened) — so the mask shape is
@@ -88,6 +103,21 @@ function maskToImageData(mask: Mat): ImageData {
   // Real ImageData (not a duck-typed object): the debug view feeds this to
   // canvas putImageData, which rejects plain objects. Debug path is browser-only.
   return new ImageData(out, cols, rows)
+}
+
+/** Ray-cast point-in-polygon over an OpenCV int contour (data32S, xy pairs).
+ *  Used instead of cv.pointPolygonTest, which asserts a float contour. */
+export function pointInContour(pts: Int32Array, x: number, y: number): boolean {
+  let inside = false
+  const n = pts.length / 2
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = pts[i * 2]
+    const yi = pts[i * 2 + 1]
+    const xj = pts[j * 2]
+    const yj = pts[j * 2 + 1]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
 }
 
 export async function detectQuadCv(
@@ -118,11 +148,13 @@ export async function detectQuadCv(
     const hsv = keep(new cv.Mat())
     cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV)
 
-    // Sample felt colour from a 20% box around the sample point (centre by
-    // default — the reticle sits there on-device). Clamped so the box stays
-    // in-frame even when the sample point is near an edge.
-    const bw = Math.max(1, Math.round(width * 0.2))
-    const bh = Math.max(1, Math.round(height * 0.2))
+    // Sample felt colour from a box around the sample point (centre by default —
+    // the reticle sits there on-device). Clamped so the box stays in-frame even
+    // when the sample point is near an edge. Kept small (10%) so an angled
+    // foreground table's thin felt strip doesn't drag the sample onto the
+    // surrounding rail/floor.
+    const bw = Math.max(1, Math.round(width * 0.1))
+    const bh = Math.max(1, Math.round(height * 0.1))
     const roiRect = new cv.Rect(
       Math.min(width - bw, Math.max(0, Math.round(o.sample.x * width - bw / 2))),
       Math.min(height - bh, Math.max(0, Math.round(o.sample.y * height - bh / 2))),
@@ -130,27 +162,42 @@ export async function detectQuadCv(
       bh,
     )
     const roi = keep(hsv.roi(roiRect))
-    const mean = cv.mean(roi) // [H, S, V, _]
-    const hue = mean[0]
+    // MEDIAN, not mean: the box can still straddle felt + wood rail, and hue is
+    // circular so an average of blue felt and brown wood lands on a bogus green
+    // that matches neither. The per-channel median picks the dominant surface
+    // (felt, when the box is mostly felt) instead of a colour that isn't there.
+    const roiC = keep(roi.clone()) // ROI view isn't contiguous; clone to read .data
+    const d = roiC.data // HSV interleaved, CV_8UC3
+    const hs: number[] = []
+    const ss: number[] = []
+    const vs: number[] = []
+    for (let i = 0; i < d.length; i += 3) {
+      hs.push(d[i])
+      ss.push(d[i + 1])
+      vs.push(d[i + 2])
+    }
+    const median = (a: number[]) => (a.sort((x, y) => x - y), a[a.length >> 1])
+    const hue = median(hs)
+    const sat = median(ss)
+    const val = median(vs)
 
+    // Achromatic felt (grey/silver cloth) has no usable hue and near-zero
+    // saturation, so the chromatic hue±tol / minSat path masks it out entirely.
+    // Detect it from the sampled saturation and instead segment by a VALUE band
+    // (any hue, saturation capped low). Morphology + largest-contour + rail
+    // refinement downstream reject stray low-sat regions (walls, glare edges).
+    const achromatic = sat <= o.achromaSat
     // inRange bounds as full-size scalar Mats (opencv.js wants Mats, not JS
-    // arrays). Saturation floored so glare (low-sat near-white) is rejected.
-    const low = keep(
-      new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [
-        Math.max(0, hue - o.hueTol),
-        o.minSat,
-        40,
-        0,
-      ]),
-    )
-    const high = keep(
-      new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [
-        Math.min(180, hue + o.hueTol),
-        255,
-        255,
-        255,
-      ]),
-    )
+    // arrays). Chromatic: hue window + sat floor (rejects glare). Achromatic:
+    // full hue, sat ≤ cap, value within ±valTol of the sampled grey.
+    const lowVals = achromatic
+      ? [0, 0, Math.max(0, val - o.valTol), 0]
+      : [Math.max(0, hue - o.hueTol), o.minSat, 40, 0]
+    const highVals = achromatic
+      ? [180, o.achromaMaxSat, Math.min(255, val + o.valTol), 255]
+      : [Math.min(180, hue + o.hueTol), 255, 255, 255]
+    const low = keep(new cv.Mat(hsv.rows, hsv.cols, hsv.type(), lowVals))
+    const high = keep(new cv.Mat(hsv.rows, hsv.cols, hsv.type(), highVals))
     const mask = keep(new cv.Mat())
     cv.inRange(hsv, low, high, mask)
 
@@ -173,11 +220,19 @@ export async function detectQuadCv(
     // pixel, not just segment endpoints.
     cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
 
-    // Largest contour by area = the felt. Every cnt goes into the trash (never
-    // delete inline — a Mat both hand-deleted and in the trash gets a second
-    // delete() on the wasm heap in `finally`).
+    // Pick the felt contour. Prefer the one CONTAINING the sample point (the
+    // reticle centre — the table we're aiming at), else the largest by area.
+    // Containment matters for grey felt especially: the value band also grabs
+    // other grey tables / floor, and the largest blob may be a distant table,
+    // not ours. Every cnt goes into the trash (never delete inline — a Mat both
+    // hand-deleted and in the trash gets a second delete() on the wasm heap in
+    // `finally`).
+    const sampleX = o.sample.x * width
+    const sampleY = o.sample.y * height
     let bestCnt: Mat | null = null
     let bestArea = 0
+    let hitCnt: Mat | null = null
+    let hitArea = 0
     for (let i = 0; i < contours.size(); i++) {
       const cnt = keep(contours.get(i))
       const area = cv.contourArea(cnt)
@@ -185,6 +240,21 @@ export async function detectQuadCv(
         bestCnt = cnt
         bestArea = area
       }
+      // Sample point inside this contour? Ray-cast in JS over the contour's own
+      // int points (data32S = [x0,y0,x1,y1,…]). NOT cv.pointPolygonTest — that
+      // asserts a CV_32F contour and findContours gives CV_32S, so it throws.
+      if (area > hitArea && pointInContour(cnt.data32S, sampleX, sampleY)) {
+        hitCnt = cnt
+        hitArea = area
+      }
+    }
+    // Prefer the sample-containing contour only if it's itself a plausible felt
+    // (≥ minCoverage). Otherwise the sample landed on a small fragment (felt
+    // split by cues/balls/reflections) — keep the largest blob instead of
+    // nulling out on a sliver.
+    if (hitCnt && hitArea / (width * height) >= o.minCoverage) {
+      bestCnt = hitCnt
+      bestArea = hitArea
     }
     if (!bestCnt) return null
     const coverage = bestArea / (width * height)
@@ -265,7 +335,9 @@ export async function detectQuadCv(
         }
       : {}
     return { corners, coverage, ...dbg }
-  } catch {
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    if (opts.debug) console.warn('[detect] threw', e)
     return null
   } finally {
     for (const m of trash) {

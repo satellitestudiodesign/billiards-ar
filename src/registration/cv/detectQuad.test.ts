@@ -116,3 +116,15 @@ describe('detectQuad', () => {
     expect(detectQuad(img)).toBeNull()
   })
 })
+
+import { pointInContour } from './detectQuadCv'
+
+describe('pointInContour', () => {
+  // 10x10 box contour (int xy pairs, as OpenCV data32S)
+  const box = new Int32Array([0, 0, 10, 0, 10, 10, 0, 10])
+  it('inside vs outside', () => {
+    expect(pointInContour(box, 5, 5)).toBe(true)
+    expect(pointInContour(box, 15, 5)).toBe(false)
+    expect(pointInContour(box, -1, 5)).toBe(false)
+  })
+})
