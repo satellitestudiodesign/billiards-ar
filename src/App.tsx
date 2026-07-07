@@ -73,6 +73,10 @@ function ARApp() {
           <Link href="?debug" colorPalette="blue">
             {t('debugLink')}
           </Link>
+          {' · '}
+          <Link href="?detect" colorPalette="blue">
+            {t('detectLink')}
+          </Link>
           .
         </Text>
       </div>

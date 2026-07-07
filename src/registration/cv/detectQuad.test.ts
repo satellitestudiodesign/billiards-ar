@@ -79,6 +79,33 @@ describe('detectQuad', () => {
     expect(d).toEqual(bl)
   })
 
+  it('does not collapse a strongly-tilted quad (one vertex wins two extremes)', () => {
+    // Perspective/rotated quad where the far-left vertex minimises BOTH x+y and
+    // x−y — the old extreme-sum/diff ordering duplicated it into a degenerate
+    // line. Expect 4 distinct corners, TL first, clockwise.
+    const a = { x: 10, y: 100 } // far left (min sum AND min diff)
+    const b = { x: 200, y: 10 } // top
+    const c = { x: 400, y: 120 } // right
+    const d = { x: 210, y: 220 } // bottom
+    const out = orderCorners([c, a, d, b]) // shuffled in
+    expect(out).toEqual([a, b, c, d])
+    expect(new Set(out.map((p) => `${p.x},${p.y}`)).size).toBe(4) // no duplicates
+  })
+
+  it('orders a quad with an off-frame (negative-coordinate) corner', () => {
+    // Rail-line reconstruction can put a corner outside the image; ordering
+    // must still work (centroid-angle sort handles negatives).
+    const tl = { x: -40, y: 20 } // off the left edge
+    const tr = { x: 300, y: 15 }
+    const br = { x: 290, y: 220 }
+    const bl = { x: -30, y: 210 }
+    const [a, b, c, d] = orderCorners([bl, tr, tl, br])
+    expect(a).toEqual(tl)
+    expect(b).toEqual(tr)
+    expect(c).toEqual(br)
+    expect(d).toEqual(bl)
+  })
+
   it('returns null when there is no felt', () => {
     const img = makeImage(200, 160, [130, 130, 130], [
       { x: 0, y: 0 },

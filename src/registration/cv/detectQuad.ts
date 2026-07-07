@@ -73,16 +73,33 @@ function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
  * heuristic detector and the OpenCV contour detector.
  */
 export function orderCorners(pts: PixelPoint[]): PixelPoint[] {
-  let tl = pts[0], br = pts[0], tr = pts[0], bl = pts[0]
-  for (const p of pts) {
-    const sum = p.x + p.y
-    const diff = p.x - p.y
-    if (sum < tl.x + tl.y) tl = p
-    if (sum > br.x + br.y) br = p
-    if (diff > tr.x - tr.y) tr = p
-    if (diff < bl.x - bl.y) bl = p
+  if (pts.length !== 4) return pts
+  // Rotation-robust: the extreme-sum/diff trick collapses under strong
+  // perspective (one vertex wins two extremes → a duplicated corner → a
+  // degenerate quad). Instead sort the 4 vertices cyclically by angle about
+  // their centroid (always 4 distinct points), anchor at the top-left-most
+  // (min x+y), then force clockwise (image-space) winding = TL, TR, BR, BL.
+  const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4
+  const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4
+  const cyclic = [...pts].sort(
+    (a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx),
+  )
+  // Rotate so the top-left-most corner is first.
+  let start = 0
+  for (let i = 1; i < 4; i++) {
+    if (cyclic[i].x + cyclic[i].y < cyclic[start].x + cyclic[start].y) start = i
   }
-  return [tl, tr, br, bl]
+  const ordered = [...cyclic.slice(start), ...cyclic.slice(0, start)]
+  // Signed area (screen coords, y down): >0 = clockwise = TL→TR→BR→BL. If
+  // it came out counter-clockwise, reverse the tail (keep TL first).
+  let area = 0
+  for (let i = 0; i < 4; i++) {
+    const p = ordered[i]
+    const q = ordered[(i + 1) % 4]
+    area += p.x * q.y - q.x * p.y
+  }
+  if (area < 0) return [ordered[0], ordered[3], ordered[2], ordered[1]]
+  return ordered
 }
 
 /**
