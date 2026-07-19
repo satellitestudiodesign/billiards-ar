@@ -3,7 +3,13 @@
   padding: 16px;
   color: #eee;
   background: #15151c;
-  min-height: 100vh;
+  /* Global index.css locks the app for fullscreen AR (#root inset:0, body
+     overflow:hidden, touch-action:none). This desktop route needs to scroll,
+     so it's its own scroll container filling that fixed root. */
+  height: 100dvh;
+  overflow-y: auto;
+  touch-action: auto;
+  box-sizing: border-box;
 }
 
 .controls {

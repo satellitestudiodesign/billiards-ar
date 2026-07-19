@@ -22,7 +22,7 @@
  * glare, detection degrades — that's the documented ceiling.
  */
 import type { Mat } from '@techstark/opencv-js'
-import { loadOpenCv } from './opencv'
+import { loadOpenCv, type Cv } from './opencv'
 import { orderCorners, type PixelPoint } from './detectQuad'
 import {
   fitQuadFromMask,
@@ -74,7 +74,29 @@ export interface CvDetectOptions {
    *  the on-device reticle sits there). Debug view overrides it for photos
    *  where the table isn't centred. */
   sample?: { x: number; y: number }
+  /** Felt-mask producer. Default = `hsvFeltMask` (colour segmentation). The
+   *  swappable stage: a learned segmenter drops in here, leaving the rail-line
+   *  fit + PnP downstream unchanged. See docs/learned-felt-detector.md. */
+  maskSource?: MaskSource
 }
+
+export interface FeltMask {
+  /** Binary felt mask (CV_8U, 255 = felt). Caller OWNS it and must delete(). */
+  mask: Mat
+  /** Sampled felt hue (OpenCV H, 0..180) — debug only. */
+  hue: number
+  /** Segmented by value-band (grey/achromatic cloth) instead of hue. */
+  achromatic: boolean
+}
+
+/**
+ * Produces a felt mask from an image — THE swappable stage of the felt
+ * detector. The default `hsvFeltMask` is colour segmentation; a learned
+ * segmenter (planned, see docs/learned-felt-detector.md) drops in behind this
+ * same signature so the rail-line fit + PnP downstream stay identical. Returns
+ * null if it can't produce a mask (e.g. model/wasm unavailable).
+ */
+export type MaskSource = (cv: Cv, image: ImageData, opts: CvDetectOptions) => FeltMask | null
 
 const CV_DEFAULTS = {
   minCoverage: 0.06,
@@ -120,27 +142,23 @@ export function pointInContour(pts: Int32Array, x: number, y: number): boolean {
   return inside
 }
 
-export async function detectQuadCv(
-  image: ImageData,
-  opts: CvDetectOptions = {},
-): Promise<CvDetection | null> {
+/**
+ * Default felt-mask source: HSV colour segmentation. Samples the felt colour
+ * near the reticle centre, thresholds a hue window (or a value band for
+ * grey/achromatic cloth) and morphologically closes ball/glare holes. Owns
+ * only transient Mats; the returned mask belongs to the caller.
+ */
+export const hsvFeltMask: MaskSource = (cv, image, opts) => {
   const o = { ...CV_DEFAULTS, ...opts }
-  let cv
-  try {
-    cv = await loadOpenCv()
-  } catch {
-    return null
-  }
-
   const { width, height } = image
-  // Every allocated Mat goes here so a single finally frees them (opencv.js
-  // has no GC — undeleted Mats leak the wasm heap frame after frame).
   const trash: unknown[] = []
   const keep = <T,>(m: T): T => {
     trash.push(m)
     return m
   }
-
+  // Threw after allocating the output mask ⇒ free it in finally (it's not in
+  // `trash`, since on success ownership passes to the caller).
+  let mask: Mat | null = null
   try {
     const rgba = keep(cv.matFromImageData(image))
     const rgb = keep(new cv.Mat())
@@ -198,21 +216,68 @@ export async function detectQuadCv(
       : [Math.min(180, hue + o.hueTol), 255, 255, 255]
     const low = keep(new cv.Mat(hsv.rows, hsv.cols, hsv.type(), lowVals))
     const high = keep(new cv.Mat(hsv.rows, hsv.cols, hsv.type(), highVals))
-    const mask = keep(new cv.Mat())
+    mask = new cv.Mat()
     cv.inRange(hsv, low, high, mask)
 
     // Close ball/glare holes, then open to kill isolated specks. Kernel scales
     // with image size so it behaves the same at any capture resolution.
     const k = Math.max(3, Math.round(Math.min(width, height) / 100))
-    // Frame-clip margin: a real clip run sits essentially ON the image edge, so
-    // keep this tiny (just the literal border + morphology/AA slop). Too large
-    // (e.g. the morphology kernel k) eats rails that merely run CLOSE to the
-    // frame — a table can legitimately fill the view to within a few px without
-    // being cut off.
-    const clipMargin = Math.max(1, Math.round(Math.min(width, height) / 500))
     const kernel = keep(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(k, k)))
     cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel)
     cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kernel)
+
+    const out: FeltMask = { mask, hue, achromatic }
+    mask = null // ownership transferred to caller — don't free in finally
+    return out
+  } catch {
+    return null
+  } finally {
+    if (mask) mask.delete()
+    for (const m of trash) {
+      try {
+        ;(m as { delete(): void }).delete()
+      } catch {
+        /* already freed */
+      }
+    }
+  }
+}
+
+export async function detectQuadCv(
+  image: ImageData,
+  opts: CvDetectOptions = {},
+): Promise<CvDetection | null> {
+  const o = { ...CV_DEFAULTS, ...opts }
+  let cv
+  try {
+    cv = await loadOpenCv()
+  } catch {
+    return null
+  }
+
+  const { width, height } = image
+  // Every allocated Mat goes here so a single finally frees them (opencv.js
+  // has no GC — undeleted Mats leak the wasm heap frame after frame).
+  const trash: unknown[] = []
+  const keep = <T,>(m: T): T => {
+    trash.push(m)
+    return m
+  }
+
+  const maskSource = opts.maskSource ?? hsvFeltMask
+
+  try {
+    const felt = maskSource(cv, image, opts)
+    if (!felt) return null
+    const mask = keep(felt.mask) // caller owns the mask; free it with everything else
+    const { hue } = felt
+
+    // Frame-clip margin: a real clip run sits essentially ON the image edge, so
+    // keep this tiny (just the literal border + morphology/AA slop). Too large
+    // (e.g. the mask source's morphology kernel) eats rails that merely run
+    // CLOSE to the frame — a table can legitimately fill the view to within a
+    // few px without being cut off.
+    const clipMargin = Math.max(1, Math.round(Math.min(width, height) / 500))
 
     const contours = keep(new cv.MatVector())
     const hierarchy = keep(new cv.Mat())

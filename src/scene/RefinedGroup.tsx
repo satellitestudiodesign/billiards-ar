@@ -13,7 +13,7 @@
  */
 import { useRef, type ReactNode } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { Matrix4, Plane, Quaternion, Vector3, type Group } from 'three'
+import { Matrix4, Quaternion, Vector3, type Group } from 'three'
 import { useAppStore } from '../appStore'
 import { fitTableRectangle, type RectFit } from '../registration/fitRectangle'
 import { detectTableCorners } from '../registration/cv/detectTable'
@@ -59,13 +59,11 @@ export function RefinedGroup({ fit, children }: { fit: RectFit; children: ReactN
     const parent = g.parent
     g.getWorldPosition(worldPos)
     g.getWorldQuaternion(worldQuat)
-    const normal = new Vector3(0, 1, 0).applyQuaternion(worldQuat)
-    const plane = new Plane().setFromNormalAndCoplanarPoint(normal, worldPos.clone())
     const curPos = worldPos.clone()
     const curQuat = worldQuat.clone()
 
     ;(async () => {
-      const corners = await detectTableCorners(gl, plane)
+      const corners = await detectTableCorners(gl)
       if (typeof corners === 'string') return
       let det: RectFit | undefined
       try {

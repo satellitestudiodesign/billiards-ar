@@ -7,7 +7,6 @@ import { useAppStore } from '../appStore'
 import { reticle } from '../xr/reticleState'
 import { detectTableCorners } from '../registration/cv/detectTable'
 import { preloadOpenCv } from '../registration/cv/opencv'
-import { planeFromPose } from '../registration/cv/projectToPlane'
 import { CornerConsensus } from '../registration/cornerConsensus'
 import { overlayTappedRecently } from '../ui/overlayGuard'
 
@@ -77,14 +76,10 @@ export function RegistrationScene() {
       while (!cancelled && performance.now() < deadline) {
         await new Promise((r) => setTimeout(r, LOCK.intervalMs))
         if (cancelled || useAppStore.getState().manual) return
-        // Fresh plane each pass — the jitter-averaged reticle keeps improving
-        // (and keeps its last pose during brief tracking misses).
-        const normal = new Vector3(0, 1, 0).applyQuaternion(reticle.quaternion)
-        const plane = planeFromPose(reticle.position, normal)
 
-        // detectTableCorners awaits an XRFrame internally, so this loop is
-        // frame-paced, not a busy spin.
-        const res = await detectTableCorners(gl, plane)
+        // detectTableCorners solves the table pose by PnP (no AR plane), and
+        // awaits an XRFrame internally, so this loop is frame-paced.
+        const res = await detectTableCorners(gl)
         if (cancelled) return
         if (res === 'no-camera') {
           ghost.current.visible = false

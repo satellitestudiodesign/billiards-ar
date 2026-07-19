@@ -8,12 +8,15 @@ import { ARScene } from './scene/ARScene'
 import { Overlay } from './ui/Overlay'
 import { DebugApp } from './DebugApp'
 import { DetectDebug } from './DetectDebug'
+import { LabelDebug } from './LabelDebug'
 import styles from './App.module.css'
 
 export function App() {
   const params = new URLSearchParams(location.search)
   // ?detect — desktop route: run the felt detector on a picked photo
   if (params.has('detect')) return <DetectDebug />
+  // ?label — desktop route: hand-correct felt-mask training labels
+  if (params.has('label')) return <LabelDebug />
   // ?debug — desktop route: table + drills + playback in a normal canvas
   if (params.has('debug')) return <DebugApp />
   return <ARApp />
@@ -76,6 +79,10 @@ function ARApp() {
           {' · '}
           <Link href="?detect" colorPalette="blue">
             {t('detectLink')}
+          </Link>
+          {' · '}
+          <Link href="?label" colorPalette="blue">
+            label
           </Link>
           .
         </Text>

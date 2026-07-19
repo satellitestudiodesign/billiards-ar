@@ -15,7 +15,7 @@ import type cvModule from '@techstark/opencv-js'
 
 // The typings export the cv namespace's members; the runtime value is the
 // module object. `Mat` presence is the "already initialised" signal.
-type Cv = typeof cvModule
+export type Cv = typeof cvModule
 
 let readyPromise: Promise<Cv> | null = null
 

@@ -1,6 +1,8 @@
 /**
- * One full detection pass: camera frame → felt quad → world corners on the
- * table plane. Shared by the registration lock-on loop and the post-anchor
+ * One full detection pass: camera frame → felt quad → world corners of the
+ * playing surface, via PnP pose (SOLVEPNP_IPPE) against the known 2:1 model.
+ * No AR plane / hit-test is involved — this replaced the drifty plane
+ * back-projection. Shared by the registration lock-on loop and the post-anchor
  * continuous refinement.
  *
  * Failure is a reason string (not an exception) so callers can distinguish
@@ -8,13 +10,14 @@
  * sampling).
  */
 import type { WebGLRenderer } from 'three'
-import { Plane, Vector2, Vector3 } from 'three'
+import { Vector3 } from 'three'
 import { captureCameraFrame } from './captureFrame'
 import { detectQuad } from './detectQuad'
 import { detectQuadCv } from './detectQuadCv'
-import { cameraFromCapture, projectToPlane } from './projectToPlane'
+import { loadOpenCv } from './opencv'
+import { solveTablePose } from './tablePose'
 
-export type DetectFailure = 'no-camera' | 'no-quad' | 'off-plane'
+export type DetectFailure = 'no-camera' | 'no-quad' | 'no-pose'
 
 /**
  * Cushion-nose inset. The colour detector segments the FELT CLOTH, whose edge
@@ -22,7 +25,8 @@ export type DetectFailure = 'no-camera' | 'no-quad' | 'off-plane'
  * the cushion nose (the ball-contact line, which is what `fitRectangle`'s
  * PLAYING_LENGTH model expects). Insetting each felt edge inward by this much
  * moves the detected quad onto the nose line, so the fitted table isn't
- * systematically oversized and the size-class RMS stays clean.
+ * systematically oversized and the size-class RMS stays clean. Fed to
+ * `solveTablePose` as the cloth-vs-nose model offset.
  *
  * Physical constant — a real cushion's cloth-edge-to-nose distance. Tune on
  * device against a known table. // VERIFY vs measured cushion geometry
@@ -65,74 +69,28 @@ export function downscaleImage(img: ImageData, maxW: number): ImageData {
 
 export async function detectTableCorners(
   renderer: WebGLRenderer,
-  plane: Plane,
 ): Promise<Vector3[] | DetectFailure> {
   const cap = await captureCameraFrame(renderer)
   if (!cap) return 'no-camera'
   const image = downscaleImage(cap.image, MAX_DETECT_WIDTH)
 
-  // Advanced OpenCV detector first; heuristic fallback if the wasm didn't
-  // load or found nothing.
-  const cv = await detectQuadCv(image)
-  const quad = cv?.corners ?? detectQuad(image)
+  // Advanced OpenCV detector first; heuristic fallback if it found nothing.
+  const cvDet = await detectQuadCv(image)
+  const quad = cvDet?.corners ?? detectQuad(image)
   if (!quad) return 'no-quad'
 
-  // Back-project through the exact XRView frustum the image was captured
-  // through (fixes the FOV-mismatch bias). Corner pixels are in the
-  // downscaled image's coordinates, so pass ITS dimensions for NDC mapping.
-  const world = projectToPlane(quad, image.width, image.height, cameraFromCapture(cap), plane)
-  if (!world) return 'off-plane'
-  // Cloth edge → cushion-nose line, so fitRectangle's playing-surface model lands right.
-  return insetToNoseLine(world, plane.normal, CUSHION_INSET_M)
-}
+  // PnP needs the OpenCV module for solvePnP; no module ⇒ no CV at all here.
+  const cv = await loadOpenCv().catch(() => null)
+  if (!cv) return 'no-camera'
 
-/**
- * Move each edge of a coplanar quad inward by `d` (metres) along its in-plane
- * inward normal, re-intersecting adjacent offset edges to get the new corners.
- * Proper polygon inset (not a naive pull-toward-centroid), so it's correct for
- * a non-square perspective quad. Returns the input unchanged if the geometry is
- * degenerate (edges would cross — inset too large for the quad).
- */
-export function insetToNoseLine(corners: Vector3[], normal: Vector3, d: number): Vector3[] {
-  if (d <= 0) return corners
-  // In-plane 2D basis centred on the quad centroid.
-  const c = new Vector3()
-  for (const p of corners) c.addScaledVector(p, 1 / 4)
-  const u = new Vector3().subVectors(corners[1], corners[0]).normalize()
-  const v = new Vector3().crossVectors(normal, u).normalize()
-  const to2 = (p: Vector3) => {
-    const w = new Vector3().subVectors(p, c)
-    return new Vector2(w.dot(u), w.dot(v))
-  }
-  const p2 = corners.map(to2)
-
-  // Inward-offset line per edge i (corners[i] → corners[i+1]).
-  const offset = p2.map((a, i) => {
-    const b = p2[(i + 1) % 4]
-    const dir = new Vector2().subVectors(b, a)
-    if (dir.lengthSq() < 1e-9) return null
-    dir.normalize()
-    const n = new Vector2(-dir.y, dir.x)
-    const mid = new Vector2().addVectors(a, b).multiplyScalar(0.5)
-    if (n.dot(mid) > 0) n.negate() // point toward the centroid (origin here)
-    return { pt: new Vector2().addVectors(a, n.multiplyScalar(d)), dir }
-  })
-  if (offset.some((o) => !o)) return corners
-
-  // New corner i = intersection of offset edge (i-1) and offset edge i.
-  const cross = (ax: number, ay: number, bx: number, by: number) => ax * by - ay * bx
-  const out2: Vector2[] = []
-  for (let i = 0; i < 4; i++) {
-    const l1 = offset[(i + 3) % 4]!
-    const l2 = offset[i]!
-    const denom = cross(l1.dir.x, l1.dir.y, l2.dir.x, l2.dir.y)
-    if (Math.abs(denom) < 1e-6) return corners // parallel adjacent edges — bail
-    const dp = new Vector2().subVectors(l2.pt, l1.pt)
-    const t = cross(dp.x, dp.y, l2.dir.x, l2.dir.y) / denom
-    out2.push(new Vector2().addVectors(l1.pt, l1.dir.clone().multiplyScalar(t)))
-  }
-  // Sanity: inset must shrink the quad, not invert it.
-  if (out2.some((q) => !Number.isFinite(q.x) || !Number.isFinite(q.y))) return corners
-
-  return out2.map((q) => new Vector3().copy(c).addScaledVector(u, q.x).addScaledVector(v, q.y))
+  // Intrinsics come from the XRView projection scaled to the DOWNSCALED image
+  // the corners are in, so width/height must be the downscaled dimensions.
+  const fit = solveTablePose(
+    cv,
+    quad,
+    { projection: cap.projection, view: cap.view, width: image.width, height: image.height },
+    { insetM: CUSHION_INSET_M },
+  )
+  if (!fit) return 'no-pose'
+  return fit.best.corners
 }
