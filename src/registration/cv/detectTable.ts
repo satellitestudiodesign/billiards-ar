@@ -15,7 +15,8 @@ import { captureCameraFrame } from './captureFrame'
 import { detectQuad } from './detectQuad'
 import { detectQuadCv } from './detectQuadCv'
 import { loadOpenCv } from './opencv'
-import { solveTablePose } from './tablePose'
+import { intrinsicsFromProjection, solveTablePose } from './tablePose'
+import type { IntrinsicsCalibrator } from './calibrateIntrinsics'
 
 export type DetectFailure = 'no-camera' | 'no-quad' | 'no-pose'
 
@@ -69,6 +70,11 @@ export function downscaleImage(img: ImageData, maxW: number): ImageData {
 
 export async function detectTableCorners(
   renderer: WebGLRenderer,
+  /** Optional session focal calibrator: fed each frame's detected corners, and
+   *  once it has enough orientation-distinct views its self-calibrated focal
+   *  replaces the biased projection-matrix guess (the dominant on-screen error).
+   *  Pass the SAME instance across the lock-on loop's frames. */
+  calibrator?: IntrinsicsCalibrator,
 ): Promise<Vector3[] | DetectFailure> {
   const cap = await captureCameraFrame(renderer)
   if (!cap) return 'no-camera'
@@ -85,11 +91,15 @@ export async function detectTableCorners(
 
   // Intrinsics come from the XRView projection scaled to the DOWNSCALED image
   // the corners are in, so width/height must be the downscaled dimensions.
+  const guessK = intrinsicsFromProjection(cap.projection, image.width, image.height)
+  calibrator?.addView(cv, quad, guessK)
+  const intrinsics = calibrator?.intrinsics() ?? undefined
+
   const fit = solveTablePose(
     cv,
     quad,
     { projection: cap.projection, view: cap.view, width: image.width, height: image.height },
-    { insetM: CUSHION_INSET_M },
+    { insetM: CUSHION_INSET_M, intrinsics },
   )
   if (!fit) return 'no-pose'
   return fit.best.corners

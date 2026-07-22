@@ -150,7 +150,18 @@ export function solveTablePose(
   cv: any,
   cornersPx: PixelPoint[],
   cap: CapturePose,
-  opts: { maxReprojRmsPx?: number; insetM?: number } = {},
+  opts: {
+    maxReprojRmsPx?: number
+    insetM?: number
+    intrinsics?: Intrinsics
+    /** Skip the "table normal points world-up" gravity filter. Needed when
+     *  there is NO real world frame (a still photo solved with an identity
+     *  view): the two IPPE planar twins differ only in out-of-plane normal and
+     *  reproject the 4 corners + coplanar model IDENTICALLY, so a 2D overlay is
+     *  unaffected, but the gravity check would reject both and yield no pose.
+     *  Never set on the live AR path — there gravity disambiguates the twin. */
+    skipGravityCheck?: boolean
+  } = {},
 ): { best: PnpFit; all: PnpFit[] } | null {
   if (cornersPx.length !== 4) return null
   const maxRms = opts.maxReprojRmsPx ?? 8
@@ -158,7 +169,10 @@ export function solveTablePose(
   // Solve pose against the cloth-sized model so the correspondence is honest;
   // report the nose-sized playing surface at the same pose (concentric).
   const insetM = opts.insetM ?? 0
-  const K = intrinsicsFromProjection(cap.projection, cap.width, cap.height)
+  // Prefer explicit (self-calibrated) intrinsics over the projection-matrix
+  // guess — the guess's focal bias is the dominant on-screen error (see
+  // calibrateIntrinsics + the pose bench).
+  const K = opts.intrinsics ?? intrinsicsFromProjection(cap.projection, cap.width, cap.height)
 
   const cameraMatrix = cv.matFromArray(3, 3, cv.CV_64F, [K.fx, 0, K.cx, 0, K.fy, K.cy, 0, 0, 1])
   const distCoeffs = cv.Mat.zeros(4, 1, cv.CV_64F)
@@ -205,8 +219,11 @@ export function solveTablePose(
 
         const { quaternion, center } = poseToWorld(rot9, t, cap.view)
         // Gravity sanity: table normal (local +Y) must point up in world.
-        const worldNormal = new Vector3(0, 1, 0).applyQuaternion(quaternion)
-        if (worldNormal.y <= 0) continue
+        // Skipped when there is no real world frame (still-photo debug).
+        if (!opts.skipGravityCheck) {
+          const worldNormal = new Vector3(0, 1, 0).applyQuaternion(quaternion)
+          if (worldNormal.y <= 0) continue
+        }
         if (reprojRmsPx > maxRms) continue
 
         // Report the NOSE-line playing surface (inset 0) at the solved pose —

@@ -8,6 +8,7 @@ import { reticle } from '../xr/reticleState'
 import { detectTableCorners } from '../registration/cv/detectTable'
 import { preloadOpenCv } from '../registration/cv/opencv'
 import { CornerConsensus } from '../registration/cornerConsensus'
+import { IntrinsicsCalibrator } from '../registration/cv/calibrateIntrinsics'
 import { overlayTappedRecently } from '../ui/overlayGuard'
 
 const scratchMatrix = new Matrix4()
@@ -71,6 +72,10 @@ export function RegistrationScene() {
     ;(async () => {
       if (!reticle.visible) return fail('Point the phone at the table')
       const consensus = new CornerConsensus()
+      // One calibrator per lock-on: as the user moves around the table the
+      // frames span different orientations, letting it self-calibrate the focal
+      // and feed it back into each subsequent pose solve (calibrateIntrinsics).
+      const calibrator = new IntrinsicsCalibrator()
       const deadline = performance.now() + LOCK.timeoutMs
 
       while (!cancelled && performance.now() < deadline) {
@@ -79,7 +84,7 @@ export function RegistrationScene() {
 
         // detectTableCorners solves the table pose by PnP (no AR plane), and
         // awaits an XRFrame internally, so this loop is frame-paced.
-        const res = await detectTableCorners(gl)
+        const res = await detectTableCorners(gl, calibrator)
         if (cancelled) return
         if (res === 'no-camera') {
           ghost.current.visible = false

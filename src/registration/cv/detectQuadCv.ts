@@ -59,8 +59,20 @@ export interface CvDetectOptions {
   minCoverage?: number
   /** Hue half-window (OpenCV H is 0..180) around the sampled felt hue. */
   hueTol?: number
-  /** Min saturation (0..255) — reject washed-out glare/grey. */
+  /** Min saturation (0..255) — reject washed-out glare/grey. Absolute floor for
+   *  the adaptive `satFloorFrac` gate below. */
   minSat?: number
+  /** Absolute min value (0..255) floor for the adaptive `valFloorFrac` gate. */
+  minVal?: number
+  /** Adaptive saturation floor as a fraction of the SAMPLED felt saturation:
+   *  a pixel must be at least this saturated relative to the felt to count. Cuts
+   *  dark/greyish shadow & body the bright felt doesn't resemble. Effective
+   *  floor = max(minSat, satFloorFrac·sampledSat). */
+  satFloorFrac?: number
+  /** Adaptive value floor as a fraction of the SAMPLED felt value — rejects
+   *  pixels much darker than the felt (the usual leak into the table body/floor
+   *  shadow). Effective floor = max(minVal, valFloorFrac·sampledVal). */
+  valFloorFrac?: number
   /** Sampled saturation at/below this → treat felt as achromatic (grey/silver
    *  cloth): segment by VALUE band instead of hue, since grey has no usable hue. */
   achromaSat?: number
@@ -102,10 +114,63 @@ const CV_DEFAULTS = {
   minCoverage: 0.06,
   hueTol: 25,
   minSat: 40,
+  minVal: 40,
+  satFloorFrac: 0.5,
+  valFloorFrac: 0.5,
   achromaSat: 35,
   valTol: 28,
   achromaMaxSat: 50,
   sample: { x: 0.5, y: 0.5 },
+}
+
+/** Circular median of OpenCV hues (0..180, wraps at both ends). Shifts every
+ *  hue into (-90,90] around the circular-mean direction, medians there, shifts
+ *  back — so red felt (hues near 0 AND 180) yields a red centre, not the ~90
+ *  a linear median would give. Empty input → 0. */
+export function circularMedianHue(hs: number[]): number {
+  if (hs.length === 0) return 0
+  let sx = 0
+  let sy = 0
+  for (const h of hs) {
+    const a = (h * Math.PI) / 90 // H/180·2π
+    sx += Math.cos(a)
+    sy += Math.sin(a)
+  }
+  const mean = Math.atan2(sy, sx)
+  const dev = hs.map((h) => {
+    let d = (h * Math.PI) / 90 - mean
+    while (d > Math.PI) d -= 2 * Math.PI
+    while (d < -Math.PI) d += 2 * Math.PI
+    return d
+  })
+  dev.sort((a, b) => a - b)
+  let a = mean + dev[dev.length >> 1]
+  while (a < 0) a += 2 * Math.PI
+  while (a >= 2 * Math.PI) a -= 2 * Math.PI
+  return (a * 90) / Math.PI // back to 0..180
+}
+
+/** Dominant felt hue = peak of a saturation-weighted hue histogram over the
+ *  sample box. Robust to multi-coloured CLUTTER at the sample point (a rack of
+ *  balls spreads thinly across many hue bins; the felt, though it may be a
+ *  minority and lower-saturation, is one coherent bin that wins the peak — where
+ *  a median/mean gets dragged to a bogus value, the 61G failure). No smoothing:
+ *  a widened window aggregates the balls' warm-hue spread (~0-30) into a fat
+ *  false peak that beats the felt. Returns -1 when no pixel clears `minSat`
+ *  (caller falls back to the achromatic path). */
+export function dominantHue(hs: number[], ss: number[], minSat = 40): number {
+  const bins = new Float64Array(180)
+  let any = false
+  for (let i = 0; i < hs.length; i++) {
+    if (ss[i] > minSat) {
+      bins[hs[i]] += ss[i]
+      any = true
+    }
+  }
+  if (!any) return -1
+  let best = 0
+  for (let b = 1; b < 180; b++) if (bins[b] > bins[best]) best = b
+  return best
 }
 
 /** Single-channel mask Mat → RGBA overlay for debug. DIMS everything OUTSIDE
@@ -195,7 +260,12 @@ export const hsvFeltMask: MaskSource = (cv, image, opts) => {
       vs.push(d[i + 2])
     }
     const median = (a: number[]) => (a.sort((x, y) => x - y), a[a.length >> 1])
-    const hue = median(hs)
+    // Felt hue = peak of a saturation-weighted hue histogram (robust to a rack
+    // of balls / clutter at the sample point — the 61G failure — and wrap-safe
+    // for red). Fall back to the circular median when no pixel is saturated
+    // enough to vote (near-grey box → achromatic path handles it below).
+    const modeHue = dominantHue(hs, ss)
+    const hue = modeHue >= 0 ? modeHue : circularMedianHue(hs)
     const sat = median(ss)
     const val = median(vs)
 
@@ -205,19 +275,45 @@ export const hsvFeltMask: MaskSource = (cv, image, opts) => {
     // (any hue, saturation capped low). Morphology + largest-contour + rail
     // refinement downstream reject stray low-sat regions (walls, glare edges).
     const achromatic = sat <= o.achromaSat
+    // Adaptive floors (chromatic branch): scale with the sampled felt so a dim
+    // scene with a colour cast doesn't leak dark shadow/body into the mask (the
+    // 5sez21 failure). Clamped to the absolute floors so a dark-but-valid felt
+    // still segments.
+    const satFloor = Math.max(o.minSat, Math.round(sat * o.satFloorFrac))
+    const valFloor = Math.max(o.minVal, Math.round(val * o.valFloorFrac))
     // inRange bounds as full-size scalar Mats (opencv.js wants Mats, not JS
-    // arrays). Chromatic: hue window + sat floor (rejects glare). Achromatic:
-    // full hue, sat ≤ cap, value within ±valTol of the sampled grey.
-    const lowVals = achromatic
-      ? [0, 0, Math.max(0, val - o.valTol), 0]
-      : [Math.max(0, hue - o.hueTol), o.minSat, 40, 0]
-    const highVals = achromatic
-      ? [180, o.achromaMaxSat, Math.min(255, val + o.valTol), 255]
-      : [Math.min(180, hue + o.hueTol), 255, 255, 255]
-    const low = keep(new cv.Mat(hsv.rows, hsv.cols, hsv.type(), lowVals))
-    const high = keep(new cv.Mat(hsv.rows, hsv.cols, hsv.type(), highVals))
-    mask = new cv.Mat()
-    cv.inRange(hsv, low, high, mask)
+    // arrays). One inRange per [h0,h1] hue sub-range OR'd together — the
+    // chromatic window wraps around 0/180 for red felt into two sub-ranges.
+    const dst = (mask = new cv.Mat())
+    const tmp = keep(new cv.Mat())
+    const inHueRange = (h0: number, h1: number, sLo: number, sHi: number, vLo: number, vHi: number, first: boolean) => {
+      const low = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [h0, sLo, vLo, 0])
+      const high = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [h1, sHi, vHi, 255])
+      if (first) {
+        cv.inRange(hsv, low, high, dst)
+      } else {
+        cv.inRange(hsv, low, high, tmp)
+        cv.bitwise_or(dst, tmp, dst)
+      }
+      low.delete()
+      high.delete()
+    }
+    if (achromatic) {
+      // Grey/silver cloth: any hue, sat ≤ cap, value within ±valTol of the grey.
+      inHueRange(0, 180, 0, o.achromaMaxSat, Math.max(0, val - o.valTol), Math.min(255, val + o.valTol), true)
+    } else {
+      // Chromatic: hue window + adaptive sat/val floors. Split around 0/180 so a
+      // red window like [-8,42] becomes [0,42] ∪ [172,180].
+      const loH = hue - o.hueTol
+      const hiH = hue + o.hueTol
+      const ranges: [number, number][] =
+        loH < 0
+          ? [[0, hiH], [180 + loH, 180]]
+          : hiH > 180
+            ? [[loH, 180], [0, hiH - 180]]
+            : [[loH, hiH]]
+      ranges.forEach(([h0, h1], i) => inHueRange(h0, h1, satFloor, 255, valFloor, 255, i === 0))
+    }
 
     // Close ball/glare holes, then open to kill isolated specks. Kernel scales
     // with image size so it behaves the same at any capture resolution.
