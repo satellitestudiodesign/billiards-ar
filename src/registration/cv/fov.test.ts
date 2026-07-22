@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fovFromFocalEquiv, focalEquivFromHFov, intrinsicsFromHFov, hFovFromIntrinsics } from './fov'
+import { fovFromFocalEquiv, focalEquivFromHFov, intrinsicsFromHFov } from './fov'
 
 describe('fov conversions', () => {
   it('50mm equiv is the ~40° "normal" lens; 24mm is wide', () => {
@@ -12,10 +12,11 @@ describe('fov conversions', () => {
     expect(f).toBeCloseTo(26, 5)
   })
 
-  it('intrinsics seed round-trips its FOV', () => {
+  it('intrinsics seed: fx gives back the requested hFov, centred pp', () => {
     const k = intrinsicsFromHFov(70, 1920, 1080)
-    expect(hFovFromIntrinsics(k, 1920)).toBeCloseTo(70, 5)
+    expect(2 * Math.atan(1920 / 2 / k.fx) * (180 / Math.PI)).toBeCloseTo(70, 5)
     expect(k.cx).toBe(960)
+    expect(k.cy).toBe(540)
     expect(k.fx).toBe(k.fy)
   })
 })

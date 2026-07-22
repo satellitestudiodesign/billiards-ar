@@ -100,6 +100,54 @@ export function intersectLines(a: FittedLine, b: FittedLine): PixelPoint | null 
   return { x: a.x + t * a.vx, y: a.y + t * a.vy }
 }
 
+/** Andrew's monotone-chain convex hull (CCW). Pure JS — no OpenCV. */
+export function convexHull(pts: PixelPoint[]): PixelPoint[] {
+  if (pts.length < 3) return [...pts]
+  const p = [...pts].sort((a, b) => a.x - b.x || a.y - b.y)
+  const cross = (o: PixelPoint, a: PixelPoint, b: PixelPoint) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+  const half = (src: PixelPoint[]): PixelPoint[] => {
+    const h: PixelPoint[] = []
+    for (const pt of src) {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], pt) <= 0) h.pop()
+      h.push(pt)
+    }
+    h.pop() // drop last (shared with the other half's first)
+    return h
+  }
+  return half(p).concat(half([...p].reverse()))
+}
+
+/** Perpendicular distance from a point to a finite segment [a,b]. */
+function segDist(p: PixelPoint, a: PixelPoint, b: PixelPoint): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const l2 = dx * dx + dy * dy
+  const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+
+/**
+ * Keep only contour points within `eps` px of the convex hull boundary — the
+ * OUTER ENVELOPE. The playing surface is convex, so every concavity in the felt
+ * contour is an occlusion artifact: a ball resting on the cloth, the rack, a
+ * pocket cutout, a glare notch. Those dents sit inside the hull and, fed to a
+ * rail-line fit, pull the line inward and rotate its angle — an error amplified
+ * at the far corner (the off-frame blow-up). Dropping them leaves the clean
+ * cushion runs, and where a ball hides a rail segment the hull bridges the gap
+ * with a chord that IS the true rail line.
+ */
+export function convexEnvelope(pts: PixelPoint[], eps: number): PixelPoint[] {
+  const hull = convexHull(pts)
+  if (hull.length < 3) return pts
+  return pts.filter((p) => {
+    for (let i = 0; i < hull.length; i++) {
+      if (segDist(p, hull[i], hull[(i + 1) % hull.length]) <= eps) return true
+    }
+    return false
+  })
+}
+
 /** Deterministic LCG — a seeded PRNG so RANSAC gives the SAME result every run
  *  (a detector that flickers frame-to-frame from RNG jitter is worse than one
  *  that's merely wrong). Numerical Recipes constants. */

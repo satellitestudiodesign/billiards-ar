@@ -6,6 +6,11 @@ import { detectQuad, type PixelPoint } from "./registration/cv/detectQuad";
 import type { FittedLine } from "./registration/cv/railLines";
 import { loadOpenCv } from "./registration/cv/opencv";
 import { solveTablePose, type PnpFit } from "./registration/cv/tablePose";
+import {
+  intrinsicsFromHFov,
+  focalEquivFromHFov,
+  fovFromFocalEquiv,
+} from "./registration/cv/fov";
 import { CUSHION_INSET_M } from "./registration/cv/detectTable";
 import { exportPairs } from "./registration/cv/datasetExport";
 import { PLAYING_LENGTH, type SizeClass } from "./registration/fitRectangle";
@@ -47,6 +52,9 @@ interface Result {
   /** Include in the exported training set. Auto-seeded from the clean-detection
    *  gate (rail-refined, not clipped); user overrides per cell. */
   accept: boolean;
+  /** Assumed horizontal FOV (deg) for this photo's pose — per-image slider, no
+   *  real intrinsics in a still. Defaults to 65. */
+  fov: number;
 }
 
 /** Every overlay layer drawn over the photo, with its checkbox label. Order =
@@ -74,7 +82,6 @@ export function DetectDebug() {
         LAYERS.map(([k]) => [k, k === "mask" || k === "pose" || k === "sample"]),
       ) as Record<LayerKey, boolean>,
   );
-  const [fov, setFov] = useState(65); // assumed horizontal FOV, degrees
   // PnP fit per image name, lifted up so the caption can show it.
   const [poses, setPoses] = useState<Record<string, PnpFit | null>>({});
   const [status, setStatus] = useState(
@@ -127,17 +134,6 @@ export function DetectDebug() {
           </label>
         ))}
         <label>
-          FOV {fov}°{" "}
-          <input
-            type="range"
-            min={40}
-            max={90}
-            step={1}
-            value={fov}
-            onChange={(e) => setFov(Number(e.target.value))}
-          />
-        </label>
-        <label>
           Photo(s):{" "}
           <input
             type="file"
@@ -169,12 +165,12 @@ export function DetectDebug() {
       </Text>
       {layers.pose && (
         <Text fontSize="sm" color="#ffcc00" mb={3}>
-          ⚠️ PnP pose uses an ASSUMED {fov}° FOV — a photo carries no real
-          camera intrinsics. The cyan overlay + size class + residual are
-          INDICATIVE only; 4 coplanar corners reproject near-perfectly at almost
-          any FOV/scale, so trust these only on-device with real intrinsics. The
-          normal post (cyan vertical) is the most FOV-sensitive cue — tune FOV
-          until it looks upright.
+          ⚠️ PnP pose uses an ASSUMED FOV (per-image slider below each photo) —
+          a photo carries no real camera intrinsics. The cyan overlay + size
+          class + residual are INDICATIVE only; 4 coplanar corners reproject
+          near-perfectly at almost any FOV/scale, so trust these only on-device
+          with real intrinsics. The normal post (cyan vertical) is the most
+          FOV-sensitive cue — tune each photo's FOV until it looks upright.
         </Text>
       )}
       <div className={styles.grid}>
@@ -183,10 +179,30 @@ export function DetectDebug() {
             <ResultCanvas
               result={r}
               layers={layers}
-              fov={fov}
+              fov={r.fov}
               onSample={(s) => resample(r.name, s)}
               onPose={(p) => setPoses((prev) => ({ ...prev, [r.name]: p }))}
             />
+            {layers.pose && (
+              <label className={styles.caption} title="Assumed horizontal FOV for this photo's pose">
+                FOV {r.fov}° H ≈ {Math.round(focalEquivFromHFov(r.fov))}mm,{" "}
+                {Math.round(fovFromFocalEquiv(focalEquivFromHFov(r.fov)).diag)}° diag{" "}
+                <input
+                  type="range"
+                  min={40}
+                  max={90}
+                  step={1}
+                  value={r.fov}
+                  onChange={(e) =>
+                    setResults((prev) =>
+                      prev.map((x) =>
+                        x.name === r.name ? { ...x, fov: Number(e.target.value) } : x,
+                      ),
+                    )
+                  }
+                />
+              </label>
+            )}
             <figcaption className={styles.caption}>
               <label title="Include in exported training set">
                 <input
@@ -415,6 +431,7 @@ async function detectOne(file: File): Promise<Result> {
     cv,
     heuristic,
     accept,
+    fov: 65, // assumed hFov; per-image slider adjusts. No intrinsics in a still.
   };
 }
 
@@ -439,10 +456,7 @@ const IDENTITY16 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 /** Synthetic pinhole for a still: horizontal FOV + image size → intrinsics and
  *  a GL projection. No real intrinsics exist for a photo — this is a guess. */
 function stillCamera(fovXdeg: number, w: number, h: number) {
-  const fx = w / 2 / Math.tan((fovXdeg * Math.PI) / 180 / 2);
-  const fy = fx; // assume square pixels
-  const cx = w / 2;
-  const cy = h / 2;
+  const { fx, fy, cx, cy } = intrinsicsFromHFov(fovXdeg, w, h);
   const projection = new Array(16).fill(0);
   projection[0] = (2 * fx) / w;
   projection[5] = (2 * fy) / h;

@@ -25,6 +25,7 @@ import type { Mat } from '@techstark/opencv-js'
 import { loadOpenCv, type Cv } from './opencv'
 import { orderCorners, type PixelPoint } from './detectQuad'
 import {
+  convexEnvelope,
   fitQuadFromMask,
   isBorderPoint,
   largestQuad,
@@ -458,12 +459,34 @@ export async function detectQuadCv(
     // occlusion and partial clipping; reconstructs off-frame corners. Falls back
     // to the seeded refine (rough quad → assign → fit) only if RANSAC can't find
     // 4 confident rails.
+    // The playing surface is convex, so any concavity in the felt contour is an
+    // occlusion artifact — balls on the cloth, the rack, pocket cutouts, glare
+    // notches. Fed raw, those dents pull a rail-line fit inward and rotate it
+    // (amplified at the far corner → off-frame blow-ups). Fit only the outer
+    // envelope. eps ~1% diag: a knob — widen if clean rails get dropped on
+    // low-res captures, tighten if shallow ball dents still leak in.
+    const diag = Math.hypot(width, height)
+    const envelope = convexEnvelope(contourPts, diag * 0.01)
+
     const railOut: { lines?: FittedLine[]; reason?: string } = {}
-    const quad = fitQuadFromMask(contourPts, width, height, {
+    const quad = fitQuadFromMask(envelope, width, height, {
       borderMargin: clipMargin,
       out: o.debug ? railOut : undefined,
     })
-    const refined = quad ?? refineRailCorners(contourPts, pts, width, height, { borderMargin: clipMargin })
+    // Fallback (seeded) when the seedless fit can't find 4 rails. Give it its
+    // OWN debug sink so the overlay shows the lines that actually made the
+    // corners — not the discarded primary attempt (which writes railOut.lines
+    // before its off-frame reject, i.e. a blown-up quad that never won).
+    const refineOut: { lines?: FittedLine[]; reason?: string } = {}
+    const refined =
+      quad ??
+      refineRailCorners(envelope, pts, width, height, {
+        borderMargin: clipMargin,
+        out: o.debug ? refineOut : undefined,
+      })
+    // Overlay reflects the WINNING fitter: primary if it succeeded, else the
+    // fallback. reason only when the winner itself failed (→ rough quad used).
+    const railWinner = quad ? railOut : refineOut
 
     // Is the felt cut off by the frame? Either a rough vertex sits on the
     // border, or a meaningful slice of the contour runs along it.
@@ -490,8 +513,8 @@ export async function detectQuadCv(
           mask: maskToImageData(mask),
           hue,
           clipped,
-          railLines: railOut.lines,
-          railReason: railOut.reason,
+          railLines: railWinner.lines,
+          railReason: refined ? undefined : railWinner.reason,
           contour: contourPts.filter((_, i) => i % 2 === 0),
         }
       : {}

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  convexEnvelope,
+  convexHull,
   fitLineTLS,
   fitQuadFromMask,
   intersectLines,
@@ -268,5 +270,32 @@ describe('refineRailCorners — frame-clipped tables', () => {
     // Left rail present but only ~15px visible — direction is under-constrained.
     const sliver = seg(leftCross, TL).slice(-15)
     expect(refineRailCorners(clippedContour(sliver), ROUGH, W, H)).toBeNull()
+  })
+})
+
+describe('convexEnvelope — occlusion (ball/rack) rejection', () => {
+  const TL = { x: 100, y: 100 }
+  const TR = { x: 540, y: 100 }
+  const BR = { x: 540, y: 380 }
+  const BL = { x: 100, y: 380 }
+
+  it('hull of a rectangle is its 4 corners', () => {
+    expect(convexHull([TL, TR, BR, BL]).length).toBe(4)
+  })
+
+  it('drops a concave ball dent, keeps the clean rail line', () => {
+    // Top rail y=100, but a ball resting on it pushes a chunk INWARD to y~140.
+    const clean = seg({ x: 150, y: 100 }, { x: 250, y: 100 })
+    const dent = seg({ x: 260, y: 140 }, { x: 320, y: 140 }) // occlusion notch
+    const rest = seg({ x: 330, y: 100 }, { x: 500, y: 100 })
+    // Other three rails so the hull is a full quad.
+    const sides = [...seg(TR, BR), ...seg(BR, BL), ...seg(BL, TL)]
+    const env = convexEnvelope([...clean, ...dent, ...rest, ...sides], 8)
+    // No surviving point sits in the dent band (y~140), well clear of the far
+    // bottom rail at y=380.
+    expect(env.some((p) => p.y > 120 && p.y < 200 && p.x > 255 && p.x < 325)).toBe(false)
+    // The top-rail fit through the envelope stays horizontal (dent would tilt it).
+    const top = env.filter((p) => p.y < 120 && p.x > 140 && p.x < 510)
+    expect(Math.abs(fitLineTLS(top).vy)).toBeLessThan(0.02)
   })
 })

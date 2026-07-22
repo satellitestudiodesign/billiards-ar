@@ -40,8 +40,3 @@ export function intrinsicsFromHFov(hFovDeg: number, widthPx: number, heightPx: n
   const fx = widthPx / 2 / Math.tan((hFovDeg / DEG) / 2)
   return { fx, fy: fx, cx: widthPx / 2, cy: heightPx / 2 }
 }
-
-/** Horizontal FOV (degrees) implied by intrinsics over an image of `widthPx`. */
-export function hFovFromIntrinsics(k: Intrinsics, widthPx: number): number {
-  return 2 * Math.atan(widthPx / 2 / k.fx) * DEG
-}
